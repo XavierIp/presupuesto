@@ -3,6 +3,7 @@
 import { relations } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   date,
   index,
   integer,
@@ -297,6 +298,11 @@ export const loanEntries = pgTable(
      */
     installments: integer("installments"),
     installmentAmount: cents("installment_amount"),
+    /**
+     * El prestamista compró algo para la otra persona con su tarjeta de crédito:
+     * es gasto en su tarjeta y deuda de la otra persona, pero no entra dinero a sus cuentas.
+     */
+    paidWithCard: boolean("paid_with_card").notNull().default(false),
     lenderTransactionId: text("lender_transaction_id").references(() => transactions.id, {
       onDelete: "set null",
     }),

@@ -64,7 +64,7 @@ export function LenderSourceFields({
         noneLabel="No registrar en mis cuentas"
         hint={
           isCredit
-            ? "Se registra como gasto en tu tarjeta: sube su deuda y entra en su pago del mes."
+            ? "Para algo que compraste tú con tu tarjeta para esta persona: a ella no le llega dinero; se suma a lo que te debe y queda como gasto en tu tarjeta."
             : "El dinero se mueve solo cuando la otra persona lo acepte."
         }
         onChange={setSource}

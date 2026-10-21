@@ -261,6 +261,14 @@
     --bank-from: #0e7490;
     --bank-to: #172554;
   }
+  .bank-card[data-type="savings"] {
+    --bank-from: #0f766e;
+    --bank-to: #134e4a;
+  }
+  .bank-card[data-type="cash"] {
+    --bank-from: #334155;
+    --bank-to: #0f172a;
+  }
 }
 
 @keyframes rise-in {

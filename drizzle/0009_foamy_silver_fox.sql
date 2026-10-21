@@ -1,0 +1,1 @@
+ALTER TABLE "loan_entries" ADD COLUMN "paid_with_card" boolean DEFAULT false NOT NULL;

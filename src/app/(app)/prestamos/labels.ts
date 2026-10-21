@@ -36,10 +36,12 @@ export function pendingTitle(
   myRole: "lender" | "borrower",
   counterpart: string,
   amount: string,
+  paidWithCard = false,
 ) {
   if (kind === "entry") {
-    return myRole === "lender"
-      ? `${counterpart} te pide ${amount}`
+    if (myRole === "lender") return `${counterpart} te pide ${amount}`;
+    return paidWithCard
+      ? `${counterpart} registró una compra para ti por ${amount} (con su tarjeta)`
       : `${counterpart} te quiere entregar ${amount}`;
   }
   return myRole === "lender"
@@ -50,5 +52,8 @@ export function pendingTitle(
 export const REQUEST_STATUS = {
   pending: { label: "Pendiente", tone: "bg-warning/15 text-warning" },
   accepted: { label: "Aceptado", tone: "bg-income/10 text-income" },
-  rejected: { label: "Rechazado", tone: "bg-muted text-muted-foreground line-through" },
+  rejected: {
+    label: "Rechazado",
+    tone: "bg-muted text-muted-foreground line-through",
+  },
 } as const;

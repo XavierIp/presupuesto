@@ -80,6 +80,7 @@ async function LoanView({
       accountId: e.accountId,
       installments: e.installments,
       installmentAmount: e.installmentAmount,
+      paidWithCard: e.paidWithCard,
       status: e.status,
       mine: e.requestedBy === data.user.id,
     })),
@@ -93,6 +94,7 @@ async function LoanView({
       accountId: p.accountId,
       installments: null,
       installmentAmount: null,
+      paidWithCard: false,
       status: p.status,
       mine: p.createdBy === data.user.id,
     })),
@@ -377,7 +379,12 @@ async function LoanView({
               const Icon = isEntry ? ArrowUpRight : ArrowDownLeft;
               const editable = h.mine && h.status === "pending" && active;
               const requestStatus = REQUEST_STATUS[h.status];
-              const title = historyTitle(h.kind, isLender, h.mine);
+              const title = historyTitle(
+                h.kind,
+                isLender,
+                h.mine,
+                h.paidWithCard,
+              );
               return (
                 <li key={h.key} className="grid gap-2 px-4 py-3">
                   <div className="flex items-center gap-3">
@@ -397,7 +404,7 @@ async function LoanView({
                         {formatDate(h.date)}
                         {h.note ? ` · ${h.note}` : ""}
                         {isLender && h.installments
-                          ? ` · con tarjeta en ${h.installments} cuotas`
+                          ? ` · en ${h.installments} cuotas`
                           : ""}
                       </p>
                     </div>
@@ -483,7 +490,13 @@ function historyTitle(
   kind: "entry" | "payment",
   isLender: boolean,
   mine: boolean,
+  paidWithCard = false,
 ) {
+  if (kind === "entry" && paidWithCard) {
+    return isLender
+      ? "Le compraste con tu tarjeta"
+      : "Te compró con su tarjeta";
+  }
   if (kind === "entry") {
     if (isLender) return mine ? "Entregaste" : "Te pidió";
     return mine ? "Pediste" : "Te entregó";

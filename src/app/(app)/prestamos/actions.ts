@@ -403,14 +403,16 @@ const amountNote = z.object({
 });
 
 /**
- * Cuenta con la que el prestamista entrega dinero: efectivo, débito o ahorro (salida de préstamo)
- * o tarjeta de crédito (se registra como gasto en la tarjeta, en 1 cuota o en cuotas).
+ * Con qué presta el prestamista: efectivo, débito o ahorro (le entrega dinero) o su tarjeta de
+ * crédito (compró algo para la otra persona: gasto en su tarjeta, en 1 cuota o en cuotas, y a la
+ * otra persona no le entra dinero).
  */
 type Funding =
   | {
       id: string | null;
       installments: number | null;
       installmentAmount: number | null;
+      paidWithCard: boolean;
     }
   | { error: Record<string, string> };
 
@@ -425,6 +427,7 @@ async function lenderFunding(
       id: null as string | null,
       installments: null,
       installmentAmount: null,
+      paidWithCard: false,
     };
   const account = await ownActiveAccount(userId, accountId);
   if (!account || account.currency !== currency) {
@@ -432,11 +435,13 @@ async function lenderFunding(
       error: { accountId: "Elige una cuenta o tarjeta en la misma moneda." },
     };
   }
-  if (account.type !== "credit" || formData.get("payMode") !== "installments") {
+  const paidWithCard = account.type === "credit";
+  if (!paidWithCard || formData.get("payMode") !== "installments") {
     return {
       id: account.id as string | null,
       installments: null,
       installmentAmount: null,
+      paidWithCard,
     };
   }
   const n = Number(formData.get("installments"));
@@ -455,6 +460,7 @@ async function lenderFunding(
     id: account.id as string | null,
     installments: n,
     installmentAmount: each,
+    paidWithCard: true,
   };
 }
 
@@ -504,7 +510,7 @@ async function lenderOut(
       installmentAmount: installments
         ? (installmentAmount ?? Math.round(amount / installments))
         : null,
-      description: `Préstamo a ${borrowerName} (con tarjeta)`,
+      description: `Compra para ${borrowerName} (con tarjeta)`,
       loanId: loan.id,
       occurredOn: todayIn(),
     })
@@ -567,6 +573,7 @@ export async function saveEntry(
     id: string | null;
     installments: number | null;
     installmentAmount: number | null;
+    paidWithCard: boolean;
   };
   if (party.role === "lender") {
     const funding = await lenderFunding(me.id, formData, party.loan.currency);
@@ -580,7 +587,12 @@ export async function saveEntry(
     );
     if ("error" in cash)
       return { ok: false, fieldErrors: { accountId: cash.error! } };
-    account = { id: cash.id, installments: null, installmentAmount: null };
+    account = {
+      id: cash.id,
+      installments: null,
+      installmentAmount: null,
+      paidWithCard: false,
+    };
   }
 
   const entryId = String(formData.get("entryId") ?? "");
@@ -613,6 +625,7 @@ export async function saveEntry(
         accountId: account.id,
         installments: account.installments,
         installmentAmount: account.installmentAmount,
+        paidWithCard: account.paidWithCard,
       })
       .where(eq(loanEntries.id, entry.id));
   } else {
@@ -626,6 +639,7 @@ export async function saveEntry(
       accountId: account.id,
       installments: account.installments,
       installmentAmount: account.installmentAmount,
+      paidWithCard: account.paidWithCard,
       status: "pending",
     });
   }
@@ -683,12 +697,16 @@ export async function respondEntry(
     id: entry.accountId,
     installments: entry.installments,
     installmentAmount: entry.installmentAmount,
+    paidWithCard: entry.paidWithCard,
   };
   let borrowerAccountId = entry.accountId;
   if (party.role === "lender") {
     const funding = await lenderFunding(me.id, formData, loan.currency);
     if ("error" in funding) return { ok: false, fieldErrors: funding.error };
     lender = funding;
+  } else if (entry.paidWithCard) {
+    // Compra con la tarjeta del prestamista: al deudor no le entra dinero, solo confirma.
+    borrowerAccountId = null;
   } else {
     const cash = await cashAccount(
       me.id,
@@ -713,16 +731,18 @@ export async function respondEntry(
       installmentAmount: lender.installmentAmount,
       borrowerName: names.borrower,
     });
-    const borrowerTx = loan.borrowerId
-      ? await moveMoney(tx, {
-          userId: loan.borrowerId,
-          accountId: borrowerAccount,
-          kind: "loan_in",
-          amount: entry.amount,
-          description: `Préstamo de ${names.lender}`,
-          loanId: loan.id,
-        })
-      : null;
+    // Con tarjeta el prestamista compró algo: no hay dinero que entre a las cuentas del deudor.
+    const borrowerTx =
+      loan.borrowerId && !lender.paidWithCard
+        ? await moveMoney(tx, {
+            userId: loan.borrowerId,
+            accountId: borrowerAccount,
+            kind: "loan_in",
+            amount: entry.amount,
+            description: `Préstamo de ${names.lender}`,
+            loanId: loan.id,
+          })
+        : null;
     await tx
       .update(loanEntries)
       .set({
@@ -732,6 +752,7 @@ export async function respondEntry(
         accountId: lender.id,
         installments: lender.installments,
         installmentAmount: lender.installmentAmount,
+        paidWithCard: lender.paidWithCard,
         lenderTransactionId: lenderTx,
         borrowerTransactionId: borrowerTx,
       })

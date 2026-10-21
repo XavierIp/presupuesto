@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, use, useId, useRef } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { createContext, use, useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { buttonClasses } from "./button";
 
@@ -29,11 +30,14 @@ export function Modal({
   description,
   trigger,
   children,
+  openParam,
 }: {
   title: string;
   description?: string;
   trigger: TriggerProps;
   children: React.ReactNode;
+  /** Si la URL trae este parámetro (p. ej. `?nuevo=1`), el modal se abre solo y al cerrarlo se quita. */
+  openParam?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -44,11 +48,15 @@ export function Modal({
       <button
         type="button"
         aria-label={trigger.ariaLabel}
-        className={buttonClasses({ variant: trigger.variant ?? "primary", className: trigger.className })}
+        className={buttonClasses({
+          variant: trigger.variant ?? "primary",
+          className: trigger.className,
+        })}
         onClick={() => ref.current?.showModal()}
       >
         {trigger.label}
       </button>
+      {openParam && <OpenFromUrl param={openParam} dialog={ref} />}
       <dialog
         ref={ref}
         aria-labelledby={titleId}
@@ -61,10 +69,15 @@ export function Modal({
         <div className="grid gap-5 p-5 sm:p-6">
           <div className="flex items-start justify-between gap-4">
             <div className="grid gap-1">
-              <h2 id={titleId} className="text-[22px] font-semibold tracking-[-0.01em]">
+              <h2
+                id={titleId}
+                className="text-[22px] font-semibold tracking-[-0.01em]"
+              >
                 {title}
               </h2>
-              {description && <p className="text-sm text-muted-foreground">{description}</p>}
+              {description && (
+                <p className="text-sm text-muted-foreground">{description}</p>
+              )}
             </div>
             <button
               type="button"
@@ -80,4 +93,36 @@ export function Modal({
       </dialog>
     </>
   );
+}
+
+/** Abre el modal si la URL trae `param` y lo quita de la URL al cerrarlo. */
+function OpenFromUrl({
+  param,
+  dialog,
+}: {
+  param: string;
+  dialog: React.RefObject<HTMLDialogElement | null>;
+}) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const requested = params.has(param);
+
+  useEffect(() => {
+    const el = dialog.current;
+    if (!el || !requested) return;
+    if (!el.open) el.showModal();
+    const onClose = () => {
+      const next = new URLSearchParams(window.location.search);
+      next.delete(param);
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    };
+    el.addEventListener("close", onClose, { once: true });
+    return () => el.removeEventListener("close", onClose);
+  }, [requested, dialog, param, pathname, router]);
+
+  return null;
 }

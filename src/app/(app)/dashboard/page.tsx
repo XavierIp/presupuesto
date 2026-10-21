@@ -6,7 +6,8 @@ import {
   ChevronLeft,
   ChevronRight,
   HandCoins,
-  Plus,
+  Banknote,
+  PiggyBank,
   Wallet,
 } from "lucide-react";
 import { AgendaList } from "@/components/payments/agenda-list";
@@ -45,21 +46,19 @@ async function Dashboard({
           style={{ "--i": 0 } as React.CSSProperties}
           className="flex flex-wrap items-end justify-between gap-4"
         >
-          <div className="grid gap-2">
+          <div className="grid w-full gap-3">
             <p className="text-[12px] font-medium tracking-[0.06em] text-muted-foreground uppercase">
               Hola, {firstName}
             </p>
-            <p className="text-sm text-muted-foreground">
-              Saldo disponible hoy
-            </p>
-            <p className="text-[40px] leading-none font-bold tracking-[-0.03em] tabular-nums sm:text-[48px]">
-              {formatMoney(data.available, currency)}
-            </p>
+            {data.mainAccount && (
+              <MainAccountCard
+                account={data.mainAccount}
+                total={data.cashAccounts > 1 ? data.available : null}
+                count={data.cashAccounts}
+                currency={currency}
+              />
+            )}
           </div>
-          <Link href="/movimientos" className={buttonClasses()}>
-            <Plus className="size-4" aria-hidden />
-            Registrar movimiento
-          </Link>
         </div>
 
         {data.loanActions > 0 && (
@@ -69,14 +68,23 @@ async function Dashboard({
             className="flex items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/5 px-5 py-4 transition-colors duration-150 hover:bg-warning/10"
           >
             <span className="flex items-center gap-3">
-              <HandCoins className="size-5 text-warning" strokeWidth={1.75} aria-hidden />
+              <HandCoins
+                className="size-5 text-warning"
+                strokeWidth={1.75}
+                aria-hidden
+              />
               <span className="font-medium">
                 Tienes {data.loanActions}{" "}
-                {data.loanActions === 1 ? "solicitud de préstamo" : "solicitudes de préstamos"} por
-                responder
+                {data.loanActions === 1
+                  ? "solicitud de préstamo"
+                  : "solicitudes de préstamos"}{" "}
+                por responder
               </span>
             </span>
-            <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+            <ChevronRight
+              className="size-4 text-muted-foreground"
+              aria-hidden
+            />
           </Link>
         )}
 
@@ -130,10 +138,16 @@ async function Dashboard({
             noteTone="expense"
           />
           <Stat
-            label={data.toCollect > 0 ? "Te pagan este mes" : "Ingresos del mes"}
-            value={formatMoney(data.toCollect > 0 ? data.toCollect : data.income, currency, {
-              signed: true,
-            })}
+            label={
+              data.toCollect > 0 ? "Te pagan este mes" : "Ingresos del mes"
+            }
+            value={formatMoney(
+              data.toCollect > 0 ? data.toCollect : data.income,
+              currency,
+              {
+                signed: true,
+              },
+            )}
             tone={data.toCollect > 0 ? "income" : undefined}
             note={
               data.toCollect > 0
@@ -228,6 +242,77 @@ async function Dashboard({
   );
 }
 
+const ACCOUNT_LABEL = {
+  cash: "Efectivo",
+  debit: "Débito",
+  savings: "Ahorro",
+  credit: "Crédito",
+};
+const ACCOUNT_ICON = {
+  cash: Banknote,
+  debit: Wallet,
+  savings: PiggyBank,
+  credit: Wallet,
+};
+
+/** Cuenta principal como tarjeta, con su saldo disponible de hoy. */
+function MainAccountCard({
+  account,
+  total,
+  count,
+  currency,
+}: {
+  account: NonNullable<DashboardData["mainAccount"]>;
+  total: number | null;
+  count: number;
+  currency: string;
+}) {
+  const Icon = ACCOUNT_ICON[account.type];
+  return (
+    <div className="grid gap-2 sm:max-w-sm">
+      <Link
+        href="/tarjetas"
+        data-type={account.type}
+        aria-label={`${account.name}: saldo disponible hoy ${formatMoney(account.balance, account.currency)}`}
+        className="bank-card pressable grid aspect-[1.7] content-between rounded-2xl p-5"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate font-semibold">{account.name}</p>
+            <p className="text-[13px] text-white/85">
+              Cuenta principal · {ACCOUNT_LABEL[account.type]}
+            </p>
+          </div>
+          <Icon
+            className="size-6 shrink-0 text-white/85"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+        </div>
+        <div className="grid gap-1">
+          <p className="text-[13px] text-white/85">Saldo disponible hoy</p>
+          <p className="text-[34px] leading-none font-bold tracking-[-0.03em] tabular-nums">
+            {formatMoney(account.balance, account.currency)}
+          </p>
+          {account.last4 && (
+            <p className="mt-2 font-mono text-sm tracking-[0.2em] text-white/85">
+              •••• {account.last4}
+            </p>
+          )}
+        </div>
+      </Link>
+      {total !== null && (
+        <p className="text-sm text-muted-foreground">
+          Total en tus {count} cuentas:{" "}
+          <span className="font-semibold text-foreground tabular-nums">
+            {formatMoney(total, currency)}
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 function BudgetsSection({ data }: { data: DashboardData }) {
   const { currency } = data.user;
   return (
@@ -311,7 +396,8 @@ function RecentSection({ data }: { data: DashboardData }) {
                 {t.kind === "transfer"
                   ? formatMoney(t.amount, t.account.currency)
                   : formatMoney(
-                      (t.kind === "income" || t.kind === "loan_in" ? 1 : -1) * t.amount,
+                      (t.kind === "income" || t.kind === "loan_in" ? 1 : -1) *
+                        t.amount,
                       t.account.currency,
                       { signed: true },
                     )}

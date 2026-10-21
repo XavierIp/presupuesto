@@ -64,6 +64,13 @@
       "when": 1792591957399,
       "tag": "0008_regular_jackal",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792593006919,
+      "tag": "0009_foamy_silver_fox",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { MORE_LINKS, MOBILE_SECTIONS, SECTIONS } from "./nav-items";
+import { buttonClasses } from "@/components/ui/button";
+import {
+  MORE_LINKS,
+  MOBILE_SECTIONS,
+  NEW_MOVEMENT,
+  SECTIONS,
+} from "./nav-items";
 
 const MORE_PATHS = ["/mas", ...MORE_LINKS.map((l) => l.href)];
 
@@ -22,8 +28,16 @@ export function SidebarNavFallback() {
 }
 
 function SidebarLinks({ pathname }: { pathname: string }) {
+  const NewIcon = NEW_MOVEMENT.icon;
   return (
     <nav aria-label="Principal" className="grid gap-1">
+      <Link
+        href={NEW_MOVEMENT.href}
+        className={buttonClasses({ className: "mb-3" })}
+      >
+        <NewIcon className="size-4" aria-hidden />
+        {NEW_MOVEMENT.label}
+      </Link>
       {SECTIONS.map(({ href, label, icon: Icon }) => {
         const active = isActive(pathname, href);
         return (
@@ -62,7 +76,20 @@ function BottomLinks({ pathname }: { pathname: string }) {
       className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm lg:hidden"
     >
       <ul className="grid grid-cols-5">
-        {MOBILE_SECTIONS.map(({ href, label, icon: Icon }) => {
+        {MOBILE_SECTIONS.map(({ href, label, icon: Icon, primary }) => {
+          if (primary) {
+            return (
+              <li key={href} className="flex justify-center">
+                <Link
+                  href={href}
+                  aria-label={label}
+                  className="pressable -mt-5 inline-flex size-14 items-center justify-center rounded-full bg-primary text-on-primary shadow-lg ring-4 ring-background"
+                >
+                  <Icon className="size-6" strokeWidth={2.25} aria-hidden />
+                </Link>
+              </li>
+            );
+          }
           const active = isActive(pathname, href);
           return (
             <li key={href}>
@@ -74,7 +101,11 @@ function BottomLinks({ pathname }: { pathname: string }) {
                   active ? "text-primary" : "text-muted-foreground",
                 )}
               >
-                <Icon className="size-5" strokeWidth={active ? 2 : 1.75} aria-hidden />
+                <Icon
+                  className="size-5"
+                  strokeWidth={active ? 2 : 1.75}
+                  aria-hidden
+                />
                 {label}
               </Link>
             </li>
@@ -84,4 +115,3 @@ function BottomLinks({ pathname }: { pathname: string }) {
     </nav>
   );
 }
-

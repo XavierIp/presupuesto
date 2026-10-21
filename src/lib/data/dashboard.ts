@@ -151,6 +151,12 @@ export async function getDashboard(monthParam?: string) {
         .map((a) => [a.id, Math.max(0, -a.balance)]),
     ) as Record<string, number>,
     defaultSourceId: primary?.id ?? null,
+    /** Cuenta principal (la primera que no es tarjeta de crédito) con su saldo de hoy. */
+    mainAccount: accounts.find((a) => a.id === primary?.id) ?? null,
+    /** Cuentas en la moneda principal (sin tarjetas de crédito) que suman el disponible. */
+    cashAccounts: accounts.filter(
+      (a) => a.currency === user.currency && a.type !== "credit",
+    ).length,
   };
 }
 

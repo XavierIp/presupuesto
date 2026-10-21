@@ -60,6 +60,7 @@ export function RespondRows({
             loan.role,
             loan.counterpart,
             money(entry.amount),
+            entry.paidWithCard,
           )}
           detail={entry.note ?? "Cuenta libre"}
         >
@@ -69,6 +70,7 @@ export function RespondRows({
               loan.role,
               loan.counterpart,
               money(entry.amount),
+              entry.paidWithCard,
             )}
             description={entry.note ?? undefined}
             trigger={trigger("Responder")}
@@ -76,6 +78,7 @@ export function RespondRows({
             <RespondEntryForm
               entryId={entry.id}
               amount={entry.amount}
+              paidWithCard={entry.paidWithCard}
               role={loan.role}
               currency={loan.currency}
               sources={sources}

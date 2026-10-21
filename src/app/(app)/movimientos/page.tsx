@@ -74,6 +74,7 @@ async function MovementsView({
         <Modal
           title="Nuevo movimiento"
           description="Gasto, ingreso o transferencia entre tus cuentas."
+          openParam="nuevo"
           trigger={{
             label: (
               <>
@@ -175,7 +176,13 @@ const KIND_LABEL = {
   loan_in: "Préstamo (entrada)",
 };
 /** Signo con que el movimiento afecta a la cuenta de origen (0 = transferencia, sin signo). */
-const KIND_SIGN = { income: 1, loan_in: 1, expense: -1, loan_out: -1, transfer: 0 };
+const KIND_SIGN = {
+  income: 1,
+  loan_in: 1,
+  expense: -1,
+  loan_out: -1,
+  transfer: 0,
+};
 
 function accountLabel(a: { name: string; last4: string | null }) {
   return a.last4 ? `${a.name} •••• ${a.last4}` : a.name;

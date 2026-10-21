@@ -6,6 +6,7 @@ import {
   Menu,
   PieChart,
   PiggyBank,
+  Plus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -20,11 +21,23 @@ export const SECTIONS: NavItem[] = [
   { href: "/ahorro", label: "Ahorro", icon: PiggyBank },
 ];
 
-/** Secciones que en móvil viven dentro de "Más". */
-export const MORE_LINKS = SECTIONS.filter((s) => s.href === "/tarjetas" || s.href === "/prestamos");
+/** Abre el formulario de nuevo movimiento desde cualquier pantalla. */
+export const NEW_MOVEMENT: NavItem = {
+  href: "/movimientos?nuevo=1",
+  label: "Nuevo movimiento",
+  icon: Plus,
+};
 
-// En móvil: máximo 5 destinos.
-export const MOBILE_SECTIONS: NavItem[] = [
-  ...SECTIONS.filter((s) => !MORE_LINKS.includes(s)),
+/** Secciones que en móvil viven dentro de "Más". */
+export const MORE_LINKS = SECTIONS.filter((s) =>
+  ["/tarjetas", "/prestamos", "/ahorro"].includes(s.href),
+);
+
+// En móvil: 4 destinos y, al centro, el botón para registrar un movimiento.
+export const MOBILE_SECTIONS: (NavItem & { primary?: boolean })[] = [
+  SECTIONS[0],
+  SECTIONS[1],
+  { ...NEW_MOVEMENT, primary: true },
+  SECTIONS[2],
   { href: "/mas", label: "Más", icon: Menu },
 ];

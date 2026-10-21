@@ -551,6 +551,7 @@ export function RespondEntryForm({
   sources,
   defaultAccountId,
   amount,
+  paidWithCard = false,
 }: {
   entryId: string;
   /** Mi rol en el préstamo. */
@@ -560,6 +561,8 @@ export function RespondEntryForm({
   defaultAccountId: string | null;
   /** Monto pedido (para sugerir las cuotas si se paga con tarjeta). */
   amount?: number;
+  /** El prestamista compró algo con su tarjeta: al deudor no le llega dinero. */
+  paidWithCard?: boolean;
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
     respondEntry,
@@ -578,6 +581,11 @@ export function RespondEntryForm({
           amount={amount}
           errors={state.fieldErrors ?? {}}
         />
+      ) : paidWithCard ? (
+        <p className="rounded-lg bg-muted px-3 py-2.5 text-sm">
+          Fue una compra con su tarjeta: no entra dinero a tus cuentas. Al
+          confirmar, se suma a lo que le debes.
+        </p>
       ) : (
         <AccountSelect
           label="¿A qué cuenta te llegó?"
