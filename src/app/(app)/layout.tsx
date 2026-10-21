@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { BottomNav, BottomNavFallback, SidebarNav, SidebarNavFallback } from "@/components/app-nav";
 import { Brand } from "@/components/brand";
 import { DniPrompt } from "@/components/dni-prompt";
+import { LiveSync } from "@/components/live-sync";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu, UserMenuSkeleton } from "@/components/user-menu";
 
@@ -37,6 +38,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
 
+      <LiveSync />
       <Suspense fallback={<BottomNavFallback />}>
         <BottomNav />
       </Suspense>

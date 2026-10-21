@@ -15,7 +15,7 @@ import {
 import { ownActiveAccount } from "@/lib/data/accounts";
 import {
   firstDayOf,
-  occurrenceInMonth,
+  occurrencesInMonth,
   parseDate,
   parseYearMonth,
   todayIn,
@@ -46,11 +46,15 @@ async function ownCategory(userId: string, categoryId: string | null) {
 
 const planSchema = z
   .object({
-    name: z.string().trim().min(1, "Ponle un nombre.").max(60, "Máximo 60 caracteres."),
+    name: z
+      .string()
+      .trim()
+      .min(1, "Ponle un nombre.")
+      .max(60, "Máximo 60 caracteres."),
     amount: money("el monto"),
     categoryId: z.string().optional(),
     accountId: z.string().optional(),
-    frequency: z.enum(["monthly", "yearly", "once"]),
+    frequency: z.enum(["monthly", "semimonthly", "yearly", "once"]),
     startDate: isoDate,
     duration: z.enum(["installments", "indefinite"]),
     installments: z.string().optional(),
@@ -72,7 +76,10 @@ const planSchema = z
     return { ...data, installments };
   });
 
-export async function createPlan(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function createPlan(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   const user = await getCurrentUser();
   const parsed = planSchema.safeParse({
     name: formData.get("name") ?? "",
@@ -89,7 +96,10 @@ export async function createPlan(_prev: FormState, formData: FormData): Promise<
   const plan = parsed.data;
   const account = await ownActiveAccount(user.id, plan.accountId);
   if (plan.accountId && (!account || account.currency !== user.currency)) {
-    return { ok: false, fieldErrors: { accountId: "Elige una cuenta válida en tu moneda." } };
+    return {
+      ok: false,
+      fieldErrors: { accountId: "Elige una cuenta válida en tu moneda." },
+    };
   }
   await db.insert(recurringPayments).values({
     accountId: account?.id ?? null,
@@ -100,7 +110,8 @@ export async function createPlan(_prev: FormState, formData: FormData): Promise<
     categoryId: await ownCategory(user.id, plan.categoryId ?? null),
     frequency: plan.frequency,
     startDate: plan.startDate,
-    dayOfMonth: parseDate(plan.startDate).day,
+    dayOfMonth:
+      plan.frequency === "semimonthly" ? 15 : parseDate(plan.startDate).day,
     installments: plan.frequency === "once" ? 1 : plan.installments,
   });
 
@@ -112,7 +123,12 @@ export async function deletePlan(planId: string): Promise<FormState> {
   const user = await getCurrentUser();
   await db
     .delete(recurringPayments)
-    .where(and(eq(recurringPayments.id, planId), eq(recurringPayments.userId, user.id)));
+    .where(
+      and(
+        eq(recurringPayments.id, planId),
+        eq(recurringPayments.userId, user.id),
+      ),
+    );
   refresh();
   return { ok: true };
 }
@@ -121,7 +137,10 @@ export async function deletePlan(planId: string): Promise<FormState> {
  * Marca como pagada la cuota del mes indicado y registra el gasto en la cuenta o tarjeta elegida.
  * Con tarjeta de crédito el gasto aumenta su deuda; con una cuenta, baja su saldo.
  */
-export async function payInstallment(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function payInstallment(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   const user = await getCurrentUser();
   const planId = String(formData.get("planId") ?? "");
   const ym = parseYearMonth(String(formData.get("month") ?? ""));
@@ -130,14 +149,25 @@ export async function payInstallment(_prev: FormState, formData: FormData): Prom
   const [plan] = await db
     .select()
     .from(recurringPayments)
-    .where(and(eq(recurringPayments.id, planId), eq(recurringPayments.userId, user.id)))
+    .where(
+      and(
+        eq(recurringPayments.id, planId),
+        eq(recurringPayments.userId, user.id),
+      ),
+    )
     .limit(1);
   if (!plan) return { ok: false, error: "No encontramos ese pago." };
 
-  const occurrence = occurrenceInMonth(plan, ym);
+  const wanted = Number(formData.get("installment"));
+  const occurrence = occurrencesInMonth(plan, ym).find(
+    (o) => !wanted || o.installment === wanted,
+  );
   if (!occurrence) return { ok: false, error: "Ese pago no cae en este mes." };
 
-  const account = await ownActiveAccount(user.id, String(formData.get("accountId") ?? ""));
+  const account = await ownActiveAccount(
+    user.id,
+    String(formData.get("accountId") ?? ""),
+  );
   if (!account || account.currency !== plan.currency) {
     return { ok: false, fieldErrors: { accountId: "Elige con qué pagas." } };
   }
@@ -145,7 +175,9 @@ export async function payInstallment(_prev: FormState, formData: FormData): Prom
 
   const total = totalInstallments(plan);
   const description =
-    total && total > 1 ? `${plan.name} · cuota ${occurrence.installment} de ${total}` : plan.name;
+    total && total > 1
+      ? `${plan.name} · cuota ${occurrence.installment} de ${total}`
+      : plan.name;
   const today = todayIn();
 
   try {
@@ -174,7 +206,8 @@ export async function payInstallment(_prev: FormState, formData: FormData): Prom
     });
   } catch (error) {
     const code = (error as { cause?: { code?: string } }).cause?.code;
-    if (code === "23505") return { ok: false, error: "Esa cuota ya estaba pagada." };
+    if (code === "23505")
+      return { ok: false, error: "Esa cuota ya estaba pagada." };
     throw error;
   }
 
@@ -186,19 +219,37 @@ export async function payInstallment(_prev: FormState, formData: FormData): Prom
 export async function undoPayment(recordId: string): Promise<FormState> {
   const user = await getCurrentUser();
   const [record] = await db
-    .select({ id: recurringPaymentRecords.id, transactionId: recurringPaymentRecords.transactionId })
+    .select({
+      id: recurringPaymentRecords.id,
+      transactionId: recurringPaymentRecords.transactionId,
+    })
     .from(recurringPaymentRecords)
-    .innerJoin(recurringPayments, eq(recurringPayments.id, recurringPaymentRecords.recurringPaymentId))
-    .where(and(eq(recurringPaymentRecords.id, recordId), eq(recurringPayments.userId, user.id)))
+    .innerJoin(
+      recurringPayments,
+      eq(recurringPayments.id, recurringPaymentRecords.recurringPaymentId),
+    )
+    .where(
+      and(
+        eq(recurringPaymentRecords.id, recordId),
+        eq(recurringPayments.userId, user.id),
+      ),
+    )
     .limit(1);
   if (!record) return { ok: false, error: "No encontramos ese pago." };
 
   await db.transaction(async (tx) => {
-    await tx.delete(recurringPaymentRecords).where(eq(recurringPaymentRecords.id, record.id));
+    await tx
+      .delete(recurringPaymentRecords)
+      .where(eq(recurringPaymentRecords.id, record.id));
     if (record.transactionId) {
       await tx
         .delete(transactions)
-        .where(and(eq(transactions.id, record.transactionId), eq(transactions.userId, user.id)));
+        .where(
+          and(
+            eq(transactions.id, record.transactionId),
+            eq(transactions.userId, user.id),
+          ),
+        );
     }
   });
 
@@ -208,7 +259,10 @@ export async function undoPayment(recordId: string): Promise<FormState> {
 
 /* ───────────── Presupuesto por categoría ───────────── */
 
-export async function saveBudget(_prev: FormState, formData: FormData): Promise<FormState> {
+export async function saveBudget(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
   const user = await getCurrentUser();
   const parsed = z
     .object({
@@ -225,11 +279,17 @@ export async function saveBudget(_prev: FormState, formData: FormData): Promise<
 
   const ym = parseYearMonth(parsed.data.month);
   const categoryId = await ownCategory(user.id, parsed.data.categoryId);
-  if (!ym || !categoryId) return { ok: false, fieldErrors: { categoryId: "Elige una categoría." } };
+  if (!ym || !categoryId)
+    return { ok: false, fieldErrors: { categoryId: "Elige una categoría." } };
 
   await db
     .insert(budgets)
-    .values({ userId: user.id, categoryId, month: firstDayOf(ym), amount: parsed.data.amount })
+    .values({
+      userId: user.id,
+      categoryId,
+      month: firstDayOf(ym),
+      amount: parsed.data.amount,
+    })
     .onConflictDoUpdate({
       target: [budgets.userId, budgets.month, budgets.categoryId],
       set: { amount: parsed.data.amount },
@@ -241,7 +301,9 @@ export async function saveBudget(_prev: FormState, formData: FormData): Promise<
 
 export async function deleteBudget(budgetId: string): Promise<FormState> {
   const user = await getCurrentUser();
-  await db.delete(budgets).where(and(eq(budgets.id, budgetId), eq(budgets.userId, user.id)));
+  await db
+    .delete(budgets)
+    .where(and(eq(budgets.id, budgetId), eq(budgets.userId, user.id)));
   refresh();
   return { ok: true };
 }

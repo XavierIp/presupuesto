@@ -1,0 +1,4 @@
+ALTER TABLE "loan_entries" ADD COLUMN "account_id" text;--> statement-breakpoint
+ALTER TABLE "loan_payments" ADD COLUMN "account_id" text;--> statement-breakpoint
+ALTER TABLE "loan_entries" ADD CONSTRAINT "loan_entries_account_id_financial_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."financial_accounts"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "loan_payments" ADD CONSTRAINT "loan_payments_account_id_financial_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."financial_accounts"("id") ON DELETE set null ON UPDATE no action;

@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { CalendarClock, ChevronLeft, ChevronRight, PencilLine, Plus, Repeat } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
+  PencilLine,
+  Plus,
+  Repeat,
+} from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { getBudgetPage, type BudgetPageData } from "@/lib/data/budget";
 import { cn } from "@/lib/cn";
@@ -120,8 +127,15 @@ function Summary({ data }: { data: BudgetPageData }) {
   const left = data.budgeted - data.budgetSpent;
 
   return (
-    <section aria-label="Resumen" className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Stat index={0} label="Presupuestado" value={formatMoney(data.budgeted, currency)} />
+    <section
+      aria-label="Resumen"
+      className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+    >
+      <Stat
+        index={0}
+        label="Presupuestado"
+        value={formatMoney(data.budgeted, currency)}
+      />
       <Stat
         index={1}
         label="Gastado en esas categorías"
@@ -293,9 +307,12 @@ function Plans({ data }: { data: BudgetPageData }) {
       <SectionTitle icon={Repeat} title="Mis pagos programados" />
       {data.plans.length === 0 ? (
         <Empty>
-          Agrega tu cuota del auto, tu plan de teléfono o cualquier pago fijo con{" "}
-          <strong className="font-medium text-foreground">Pago programado</strong>. Los verás en el
-          calendario de Inicio.
+          Agrega tu cuota del auto, tu plan de teléfono o cualquier pago fijo
+          con{" "}
+          <strong className="font-medium text-foreground">
+            Pago programado
+          </strong>
+          . Los verás en el calendario de Inicio.
         </Empty>
       ) : (
         <PlanList data={data} />
@@ -367,6 +384,8 @@ function PlanList({ data }: { data: BudgetPageData }) {
 }
 
 function describeFrequency(plan: BudgetPageData["plans"][number]) {
+  if (plan.frequency === "semimonthly")
+    return "Cada quincena: el 15 y fin de mes";
   if (plan.frequency === "once")
     return `Pago único el ${formatDate(plan.startDate)}`;
   if (plan.frequency === "yearly")

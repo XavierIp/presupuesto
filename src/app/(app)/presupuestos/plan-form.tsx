@@ -8,12 +8,18 @@ import { Field, SelectField } from "@/components/ui/field";
 import { Segmented } from "@/components/ui/segmented";
 import type { PaymentSource } from "@/lib/accounts-shared";
 import { currencySymbol, formatMoney, parseMoney } from "@/lib/money";
-import { formatDate, lastDueDate, parseDate, type Frequency } from "@/lib/schedule";
+import {
+  formatDate,
+  lastDueDate,
+  parseDate,
+  type Frequency,
+} from "@/lib/schedule";
 import { createPlan } from "./actions";
 import { useModalFormAction } from "@/components/use-modal-form-action";
 
 const FREQUENCIES: { value: Frequency; label: string }[] = [
   { value: "monthly", label: "Cada mes" },
+  { value: "semimonthly", label: "Quincenal" },
   { value: "yearly", label: "Cada año" },
   { value: "once", label: "Una vez" },
 ];
@@ -34,13 +40,22 @@ export function PlanForm({
     "Pago programado creado",
   );
   const [frequency, setFrequency] = useState<Frequency>("monthly");
-  const [duration, setDuration] = useState<"installments" | "indefinite">("installments");
+  const [duration, setDuration] = useState<"installments" | "indefinite">(
+    "installments",
+  );
   const [amount, setAmount] = useState("");
   const [startDate, setStartDate] = useState(today);
   const [installments, setInstallments] = useState("");
 
   const errors = state.fieldErrors ?? {};
-  const preview = describePlan({ frequency, duration, amount, startDate, installments, currency });
+  const preview = describePlan({
+    frequency,
+    duration,
+    amount,
+    startDate,
+    installments,
+    currency,
+  });
 
   return (
     <form
@@ -98,7 +113,9 @@ export function PlanForm({
       )}
 
       <fieldset className="grid gap-1.5">
-        <legend className="mb-1.5 text-sm font-medium">¿Cada cuánto se paga?</legend>
+        <legend className="mb-1.5 text-sm font-medium">
+          ¿Cada cuánto se paga?
+        </legend>
         <Segmented
           name="frequency"
           value={frequency}
@@ -108,15 +125,19 @@ export function PlanForm({
       </fieldset>
 
       <Field
-        label={frequency === "once" ? "Fecha del pago" : "Fecha del primer pago"}
+        label={
+          frequency === "once" ? "Fecha del pago" : "Fecha del primer pago"
+        }
         name="startDate"
         type="date"
         value={startDate}
         onChange={(e) => setStartDate(e.target.value)}
         hint={
-          frequency === "monthly" && startDate
-            ? `Se pagará el día ${parseDate(startDate).day} de cada mes.`
-            : undefined
+          frequency === "semimonthly"
+            ? "Se paga el 15 y el último día de cada mes. Elige desde cuándo empieza."
+            : frequency === "monthly" && startDate
+              ? `Se pagará el día ${parseDate(startDate).day} de cada mes.`
+              : undefined
         }
         error={errors.startDate}
       />
@@ -135,13 +156,27 @@ export function PlanForm({
           />
           {duration === "installments" && (
             <Field
-              label={frequency === "monthly" ? "Cuántas cuotas (meses)" : "Cuántos pagos (años)"}
+              label={
+                frequency === "monthly"
+                  ? "Cuántas cuotas (meses)"
+                  : frequency === "semimonthly"
+                    ? "Cuántos pagos (quincenas)"
+                    : "Cuántos pagos (años)"
+              }
               name="installments"
               inputMode="numeric"
               autoComplete="off"
-              placeholder={frequency === "monthly" ? "Ej.: 36 para 3 años" : "Ej.: 5"}
+              placeholder={
+                frequency === "monthly"
+                  ? "Ej.: 36 para 3 años"
+                  : frequency === "semimonthly"
+                    ? "Ej.: 24 para 1 año"
+                    : "Ej.: 5"
+              }
               value={installments}
-              onChange={(e) => setInstallments(e.target.value.replace(/\D/g, "").slice(0, 3))}
+              onChange={(e) =>
+                setInstallments(e.target.value.replace(/\D/g, "").slice(0, 3))
+              }
               error={errors.installments}
             />
           )}
@@ -149,7 +184,10 @@ export function PlanForm({
       )}
 
       {preview && (
-        <p className="rounded-lg bg-muted px-3 py-2.5 text-sm" aria-live="polite">
+        <p
+          className="rounded-lg bg-muted px-3 py-2.5 text-sm"
+          aria-live="polite"
+        >
           {preview}
         </p>
       )}
@@ -178,12 +216,19 @@ function describePlan({
   currency: string;
 }) {
   const cents = parseMoney(amount);
-  if (!cents || cents <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return null;
+  if (!cents || cents <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(startDate))
+    return null;
   const each = formatMoney(cents, currency);
 
-  if (frequency === "once") return `Un pago de ${each} el ${formatDate(startDate)}.`;
+  if (frequency === "once")
+    return `Un pago de ${each} el ${formatDate(startDate)}.`;
 
-  const unit = frequency === "monthly" ? "mes" : "año";
+  const unit =
+    frequency === "monthly"
+      ? "mes"
+      : frequency === "semimonthly"
+        ? "quincena (15 y fin de mes)"
+        : "año";
   if (duration === "indefinite") {
     return `${each} cada ${unit}, desde el ${formatDate(startDate)}, sin fecha de fin.`;
   }
@@ -192,7 +237,7 @@ function describePlan({
   const last = lastDueDate({
     frequency,
     startDate,
-    dayOfMonth: parseDate(startDate).day,
+    dayOfMonth: frequency === "semimonthly" ? 15 : parseDate(startDate).day,
     installments: n,
   });
   return `${n} ${n === 1 ? "pago" : "pagos"} de ${each} · último el ${last ? formatDate(last) : "—"} · total ${formatMoney(cents * n, currency)}.`;

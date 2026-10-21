@@ -1,6 +1,7 @@
 // Cálculo de fechas de pagos programados. Funciones puras sobre fechas "YYYY-MM-DD".
 
-export type Frequency = "monthly" | "yearly" | "once";
+/** `semimonthly`: quincenal, el día 15 y el último día de cada mes. */
+export type Frequency = "monthly" | "yearly" | "once" | "semimonthly";
 
 export type SchedulePlan = {
   frequency: Frequency;
@@ -58,7 +59,36 @@ function monthIndex({ year, month }: YearMonth) {
 }
 
 /** Cuota que cae en un mes dado, o null si ese mes no hay pago. */
+/** Quincenal: mitad 0 = día 15, mitad 1 = fin de mes. La primera es la que cae en o después del inicio. */
+function semimonthlyStart(startDate: string) {
+  const start = parseDate(startDate);
+  return { month: monthIndex(start), half: start.day <= 15 ? 0 : 1 };
+}
+
+function semimonthlyDue(ym: YearMonth, half: number) {
+  return half === 0 ? dueDateIn(ym, 15) : dueDateIn(ym, 31);
+}
+
+/** Todas las cuotas que caen en un mes (la quincenal puede tener dos). */
+export function occurrencesInMonth(plan: SchedulePlan, ym: YearMonth): Occurrence[] {
+  if (plan.frequency !== "semimonthly") {
+    const one = occurrenceInMonth(plan, ym);
+    return one ? [one] : [];
+  }
+  const first = semimonthlyStart(plan.startDate);
+  const result: Occurrence[] = [];
+  for (const half of [0, 1]) {
+    const index = (monthIndex(ym) - first.month) * 2 + half - first.half;
+    if (index < 0) continue;
+    if (plan.installments !== null && index >= plan.installments) continue;
+    result.push({ installment: index + 1, dueOn: semimonthlyDue(ym, half) });
+  }
+  return result;
+}
+
+/** Cuota que cae en un mes (para frecuencias de un pago por mes como máximo). */
 export function occurrenceInMonth(plan: SchedulePlan, ym: YearMonth): Occurrence | null {
+  if (plan.frequency === "semimonthly") return occurrencesInMonth(plan, ym)[0] ?? null;
   const start = parseDate(plan.startDate);
   let index: number;
 
@@ -81,6 +111,11 @@ export function lastDueDate(plan: SchedulePlan): string | null {
   const start = parseDate(plan.startDate);
   if (plan.frequency === "once") return dueDateIn(start, plan.dayOfMonth);
   if (plan.installments === null) return null;
+  if (plan.frequency === "semimonthly") {
+    const first = semimonthlyStart(plan.startDate);
+    const slot = first.half + plan.installments - 1;
+    return semimonthlyDue(addMonths(start, Math.floor(slot / 2)), slot % 2);
+  }
   const monthsPerStep = plan.frequency === "monthly" ? 1 : 12;
   return dueDateIn(addMonths(start, (plan.installments - 1) * monthsPerStep), plan.dayOfMonth);
 }

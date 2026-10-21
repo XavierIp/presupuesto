@@ -27,5 +27,28 @@ export const LOAN_STATUS: Record<string, { label: string; tone: string }> = {
   active: { label: "Activo", tone: "bg-primary/10 text-primary" },
   paid: { label: "Pagado", tone: "bg-income/10 text-income" },
   rejected: { label: "Rechazado", tone: "bg-muted text-muted-foreground" },
-  cancelled: { label: "Cancelado", tone: "bg-muted text-muted-foreground" },
+  cancelled: { label: "Cerrado", tone: "bg-muted text-muted-foreground" },
 };
+
+/** Texto de algo pendiente creado por la otra persona, visto desde mi rol. */
+export function pendingTitle(
+  kind: "entry" | "payment",
+  myRole: "lender" | "borrower",
+  counterpart: string,
+  amount: string,
+) {
+  if (kind === "entry") {
+    return myRole === "lender"
+      ? `${counterpart} te pide ${amount}`
+      : `${counterpart} te quiere entregar ${amount}`;
+  }
+  return myRole === "lender"
+    ? `${counterpart} dice que te pagó ${amount}`
+    : `${counterpart} registró que le pagaste ${amount}`;
+}
+
+export const REQUEST_STATUS = {
+  pending: { label: "Pendiente", tone: "bg-warning/15 text-warning" },
+  accepted: { label: "Aceptado", tone: "bg-income/10 text-income" },
+  rejected: { label: "Rechazado", tone: "bg-muted text-muted-foreground line-through" },
+} as const;

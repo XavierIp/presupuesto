@@ -8,8 +8,10 @@ import {
   ArrowUpRight,
   Check,
   HandCoins,
+  PencilLine,
   Plus,
   Send,
+  Trash2,
 } from "lucide-react";
 import { ConfirmActionButton } from "@/components/confirm-action-button";
 import { Modal } from "@/components/ui/modal";
@@ -17,16 +19,15 @@ import { getLoanDetail } from "@/lib/data/loans";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/money";
 import { dateIn, formatDate } from "@/lib/schedule";
-import { cancelLoan } from "../actions";
+import { cancelEntry, cancelLoan, cancelPayment } from "../actions";
 import {
-  GiveMoneyForm,
+  CloseLoanForm,
+  EntryForm,
   PaymentForm,
-  RequestMoneyForm,
   RespondLoanForm,
-  RespondPaymentForm,
-  RespondRequestForm,
 } from "../forms";
-import { describeTerms, LOAN_STATUS } from "../labels";
+import { describeTerms, LOAN_STATUS, REQUEST_STATUS } from "../labels";
+import { RespondRows } from "../respond-rows";
 
 export const metadata: Metadata = { title: "Préstamo" };
 
@@ -45,52 +46,51 @@ export default function LoanPage({ params }: PageProps<"/prestamos/[id]">) {
   );
 }
 
-const REQUEST_TONE = {
-  pending: "bg-warning/15 text-warning",
-  accepted: "bg-income/10 text-income",
-  rejected: "bg-muted text-muted-foreground line-through",
-};
-const REQUEST_LABEL = {
-  pending: "Pendiente",
-  accepted: "Aceptado",
-  rejected: "Rechazado",
-};
-
 async function LoanView({
   params,
 }: Pick<PageProps<"/prestamos/[id]">, "params">) {
   const { id } = await params;
   const data = await getLoanDetail(id);
   if (!data) notFound();
-  const { loan, sources } = data;
+  const { loan, sources, defaultCashId } = data;
   const isLender = loan.role === "lender";
   const active = loan.status === "active";
   const status = LOAN_STATUS[loan.status];
   const ratio = loan.owed > 0 ? Math.min(loan.paid / loan.owed, 1) : 0;
+  const myAccount =
+    (isLender ? loan.lenderAccountId : loan.borrowerAccountId) ?? defaultCashId;
   const available =
     loan.creditLimit !== null
       ? Math.max(loan.creditLimit - loan.lent - loan.pendingRequested, 0)
       : null;
+  const money = (cents: number) => formatMoney(cents, loan.currency);
+  const hasToRespond =
+    loan.myActions.respondEntries.length > 0 ||
+    loan.myActions.respondPayments.length > 0;
 
-  // Historial: entregas y abonos mezclados por fecha.
+  // Historial: entregas, pedidos y abonos, del más reciente al más antiguo.
   const history = [
     ...loan.entries.map((e) => ({
       key: `e-${e.id}`,
+      id: e.id,
       kind: "entry" as const,
       date: e.disbursedOn ?? dateIn(e.createdAt),
       amount: e.amount,
       note: e.note,
+      accountId: e.accountId,
       status: e.status,
-      requestedByMe: e.requestedBy === data.user.id,
+      mine: e.requestedBy === data.user.id,
     })),
     ...loan.payments.map((p) => ({
       key: `p-${p.id}`,
+      id: p.id,
       kind: "payment" as const,
       date: p.paidOn,
       amount: p.amount,
       note: p.note,
+      accountId: p.accountId,
       status: p.status,
-      requestedByMe: p.createdBy === data.user.id,
+      mine: p.createdBy === data.user.id,
     })),
   ].sort((a, b) => b.date.localeCompare(a.date));
 
@@ -144,7 +144,7 @@ async function LoanView({
               currency={loan.currency}
               sources={sources}
               amount={loan.principal}
-              defaultAccountId={data.defaultCashId}
+              defaultAccountId={defaultCashId}
             />
           </Modal>
         )}
@@ -157,52 +157,42 @@ async function LoanView({
             successMessage="Préstamo cancelado"
           />
         )}
-        {active && !isLender && loan.type === "open" && (
+        {active && loan.type === "open" && (
           <Modal
-            title="Pedir dinero"
-            description={`A ${loan.counterpart}. Lo aceptará y se sumará a tu cuenta libre.`}
+            title={isLender ? "Entregar dinero" : "Pedir dinero"}
+            description={
+              isLender
+                ? `${loan.counterpart} confirmará que lo recibió.`
+                : `${loan.counterpart} lo aceptará y se sumará a tu cuenta libre.`
+            }
             trigger={{
+              variant: isLender ? "secondary" : "primary",
               label: (
                 <>
-                  <Send className="size-4" aria-hidden />
-                  Pedir dinero
+                  {isLender ? (
+                    <Plus className="size-4" aria-hidden />
+                  ) : (
+                    <Send className="size-4" aria-hidden />
+                  )}
+                  {isLender ? "Entregar dinero" : "Pedir dinero"}
                 </>
               ),
             }}
           >
-            <RequestMoneyForm
+            <EntryForm
               loanId={loan.id}
-              currency={loan.currency}
-              available={available}
-            />
-          </Modal>
-        )}
-        {active && isLender && loan.type === "open" && (
-          <Modal
-            title="Entregar dinero"
-            description={`Se suma a lo que te debe ${loan.counterpart}.`}
-            trigger={{
-              variant: "secondary",
-              label: (
-                <>
-                  <Plus className="size-4" aria-hidden />
-                  Entregar dinero
-                </>
-              ),
-            }}
-          >
-            <GiveMoneyForm
-              loanId={loan.id}
+              role={loan.role}
               currency={loan.currency}
               sources={sources}
-              defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
+              defaultAccountId={myAccount}
+              available={available}
             />
           </Modal>
         )}
         {active && loan.balance > 0 && (
           <Modal
             title={isLender ? "Registrar cobro" : "Registrar pago"}
-            description={`Saldo pendiente: ${formatMoney(loan.balance, loan.currency)}`}
+            description={`Saldo pendiente: ${money(loan.balance)}`}
             trigger={{
               variant: isLender ? "secondary" : "primary",
               label: (
@@ -219,9 +209,33 @@ async function LoanView({
               currency={loan.currency}
               sources={sources}
               defaultAmount={loan.nextDue?.remaining ?? loan.balance}
-              defaultAccountId={
-                (isLender ? loan.lenderAccountId : loan.borrowerAccountId) ?? data.defaultCashId
-              }
+              defaultAccountId={myAccount}
+              external={loan.isExternal}
+            />
+          </Modal>
+        )}
+        {isLender && active && (
+          <Modal
+            title="Eliminar préstamo"
+            description={`Con ${loan.counterpart}`}
+            trigger={{
+              variant: "ghost",
+              className: "text-expense hover:bg-expense/10",
+              label: (
+                <>
+                  <Trash2 className="size-4" aria-hidden />
+                  Eliminar préstamo
+                </>
+              ),
+            }}
+          >
+            <CloseLoanForm
+              loanId={loan.id}
+              counterpart={loan.counterpart}
+              balance={loan.balance}
+              currency={loan.currency}
+              sources={sources}
+              defaultAccountId={myAccount}
             />
           </Modal>
         )}
@@ -230,20 +244,22 @@ async function LoanView({
       <section aria-label="Resumen" className="grid gap-4 sm:grid-cols-3">
         <Stat
           label={loan.type === "open" ? "Total entregado" : "Prestado"}
-          value={formatMoney(
-            loan.status === "pending" ? loan.principal : loan.lent,
-            loan.currency,
-          )}
+          value={money(loan.status === "pending" ? loan.principal : loan.lent)}
         />
         <Stat
           label={`Total a devolver${loan.interestRate ? " (con interés)" : ""}`}
-          value={formatMoney(loan.owed, loan.currency)}
+          value={money(loan.owed)}
         />
         <Stat
           label={isLender ? "Te falta cobrar" : "Te falta pagar"}
-          value={formatMoney(loan.balance, loan.currency)}
+          value={money(loan.balance)}
           tone={
             loan.balance > 0 ? (isLender ? "income" : "expense") : undefined
+          }
+          note={
+            loan.pendingPaid > 0
+              ? `${money(loan.pendingPaid)} en abonos por confirmar`
+              : undefined
           }
         />
       </section>
@@ -251,7 +267,7 @@ async function LoanView({
       {loan.owed > 0 && (
         <div className="grid gap-1.5">
           <div className="flex justify-between text-[13px] text-muted-foreground tabular-nums">
-            <span>Pagado {formatMoney(loan.paid, loan.currency)}</span>
+            <span>Pagado {money(loan.paid)}</span>
             <span>{Math.round(ratio * 100)} %</span>
           </div>
           <div
@@ -270,68 +286,20 @@ async function LoanView({
         </div>
       )}
 
-      {/* Pedidos y abonos pendientes de mi respuesta */}
-      {(loan.myActions.acceptEntries.length > 0 ||
-        loan.myActions.confirmPayments.length > 0) && (
+      {hasToRespond && (
         <section className="grid gap-3">
           <h2 className="text-[22px] font-semibold tracking-[-0.01em]">
             Por responder
           </h2>
           <ul className="divide-y rounded-xl border border-warning/40 bg-card">
-            {loan.myActions.acceptEntries.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
-              >
-                <div>
-                  <p className="font-medium">
-                    Te pide {formatMoney(entry.amount, loan.currency)}
-                  </p>
-                  <p className="text-[13px] text-muted-foreground">
-                    {entry.note ?? "Sin nota"}
-                  </p>
-                </div>
-                <Modal
-                  title={`Pedido de ${loan.counterpart}`}
-                  trigger={{ className: "h-10 px-3", label: "Responder" }}
-                >
-                  <RespondRequestForm
-                    entryId={entry.id}
-                    currency={loan.currency}
-                    sources={sources}
-                    defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
-                  />
-                </Modal>
-              </li>
-            ))}
-            {loan.myActions.confirmPayments.map((payment) => (
-              <li
-                key={payment.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
-              >
-                <div>
-                  <p className="font-medium">
-                    Dice que te pagó{" "}
-                    {formatMoney(payment.amount, loan.currency)}
-                  </p>
-                  <p className="text-[13px] text-muted-foreground">
-                    El {formatDate(payment.paidOn)}
-                    {payment.note ? ` · ${payment.note}` : ""}
-                  </p>
-                </div>
-                <Modal
-                  title="Confirmar abono"
-                  trigger={{ className: "h-10 px-3", label: "Revisar" }}
-                >
-                  <RespondPaymentForm
-                    paymentId={payment.id}
-                    currency={loan.currency}
-                    sources={sources}
-                    defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
-                  />
-                </Modal>
-              </li>
-            ))}
+            <RespondRows
+              loan={{
+                ...loan,
+                myActions: { ...loan.myActions, acceptLoan: false },
+              }}
+              sources={sources}
+              defaultCashId={defaultCashId}
+            />
           </ul>
         </section>
       )}
@@ -344,6 +312,7 @@ async function LoanView({
           <ul className="divide-y rounded-xl border bg-card">
             {loan.schedule.map((cuota) => {
               const overdue = !cuota.paid && cuota.dueOn < data.today;
+              const partial = !cuota.paid && cuota.remaining < cuota.amount;
               return (
                 <li
                   key={cuota.number}
@@ -359,7 +328,7 @@ async function LoanView({
                   </div>
                   <div className="text-right">
                     <p className="font-semibold tabular-nums">
-                      {formatMoney(cuota.amount, loan.currency)}
+                      {money(cuota.amount)}
                     </p>
                     <span
                       className={cn(
@@ -368,7 +337,7 @@ async function LoanView({
                           ? "bg-income/10 text-income"
                           : overdue
                             ? "bg-expense/10 text-expense"
-                            : cuota.remaining < cuota.amount
+                            : partial
                               ? "bg-warning/15 text-warning"
                               : "bg-muted text-muted-foreground",
                       )}
@@ -376,9 +345,9 @@ async function LoanView({
                       {cuota.paid
                         ? "Pagada"
                         : overdue
-                          ? `Vencida · faltan ${formatMoney(cuota.remaining, loan.currency)}`
-                          : cuota.remaining < cuota.amount
-                            ? `Faltan ${formatMoney(cuota.remaining, loan.currency)}`
+                          ? `Vencida · faltan ${money(cuota.remaining)}`
+                          : partial
+                            ? `Faltan ${money(cuota.remaining)}`
                             : "Pendiente"}
                     </span>
                   </div>
@@ -402,55 +371,97 @@ async function LoanView({
             {history.map((h) => {
               const isEntry = h.kind === "entry";
               const Icon = isEntry ? ArrowUpRight : ArrowDownLeft;
-              const title = isEntry
-                ? h.requestedByMe && !isLender
-                  ? "Pediste"
-                  : isLender
-                    ? h.requestedByMe
-                      ? "Entregaste"
-                      : "Te pidió"
-                    : "Te entregó"
-                : h.requestedByMe
-                  ? isLender
-                    ? "Registraste un cobro"
-                    : "Pagaste"
-                  : isLender
-                    ? "Te pagó"
-                    : "Registró tu pago";
+              const editable = h.mine && h.status === "pending" && active;
+              const requestStatus = REQUEST_STATUS[h.status];
+              const title = historyTitle(h.kind, isLender, h.mine);
               return (
-                <li key={h.key} className="flex items-center gap-3 px-4 py-3">
-                  <span
-                    className={cn(
-                      "inline-flex size-9 shrink-0 items-center justify-center rounded-lg",
-                      isEntry
-                        ? "bg-savings/10 text-savings"
-                        : "bg-income/10 text-income",
-                    )}
-                  >
-                    <Icon className="size-4" aria-hidden />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{title}</p>
-                    <p className="truncate text-[13px] text-muted-foreground">
-                      {formatDate(h.date)}
-                      {h.note ? ` · ${h.note}` : ""}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold tabular-nums">
-                      {formatMoney(h.amount, loan.currency)}
-                    </p>
+                <li key={h.key} className="grid gap-2 px-4 py-3">
+                  <div className="flex items-center gap-3">
                     <span
                       className={cn(
-                        "mt-1 inline-block rounded-full px-2 py-0.5 text-[12px] font-medium",
-                        REQUEST_TONE[h.status],
+                        "inline-flex size-9 shrink-0 items-center justify-center rounded-lg",
+                        isEntry
+                          ? "bg-savings/10 text-savings"
+                          : "bg-income/10 text-income",
                       )}
                     >
-                      {h.status === "pending" && !isEntry
-                        ? "Por confirmar"
-                        : REQUEST_LABEL[h.status]}
+                      <Icon className="size-4" aria-hidden />
                     </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{title}</p>
+                      <p className="truncate text-[13px] text-muted-foreground">
+                        {formatDate(h.date)}
+                        {h.note ? ` · ${h.note}` : ""}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold tabular-nums">
+                        {money(h.amount)}
+                      </p>
+                      <span
+                        className={cn(
+                          "mt-1 inline-block rounded-full px-2 py-0.5 text-[12px] font-medium",
+                          requestStatus.tone,
+                        )}
+                      >
+                        {h.status === "pending"
+                          ? h.mine
+                            ? "Esperando respuesta"
+                            : "Por responder"
+                          : requestStatus.label}
+                      </span>
+                    </div>
                   </div>
+                  {editable && (
+                    <div className="flex items-center justify-end gap-1">
+                      <Modal
+                        title="Editar"
+                        description="Sigue pendiente hasta que la otra persona lo acepte."
+                        trigger={{
+                          variant: "ghost",
+                          className: "h-10 px-3",
+                          ariaLabel: `Editar ${title.toLowerCase()} de ${money(h.amount)}`,
+                          label: (
+                            <>
+                              <PencilLine className="size-4" aria-hidden />
+                              Editar
+                            </>
+                          ),
+                        }}
+                      >
+                        {isEntry ? (
+                          <EntryForm
+                            loanId={loan.id}
+                            role={loan.role}
+                            currency={loan.currency}
+                            sources={sources}
+                            defaultAccountId={myAccount}
+                            available={available}
+                            edit={h}
+                          />
+                        ) : (
+                          <PaymentForm
+                            loanId={loan.id}
+                            role={loan.role}
+                            currency={loan.currency}
+                            sources={sources}
+                            defaultAccountId={myAccount}
+                            edit={h}
+                          />
+                        )}
+                      </Modal>
+                      <ConfirmActionButton
+                        action={(isEntry ? cancelEntry : cancelPayment).bind(
+                          null,
+                          h.id,
+                        )}
+                        icon="trash"
+                        label={`Cancelar ${title.toLowerCase()} de ${money(h.amount)}`}
+                        confirmLabel={`Confirmar cancelar ${title.toLowerCase()} de ${money(h.amount)}`}
+                        successMessage="Cancelado"
+                      />
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -461,14 +472,29 @@ async function LoanView({
   );
 }
 
+function historyTitle(
+  kind: "entry" | "payment",
+  isLender: boolean,
+  mine: boolean,
+) {
+  if (kind === "entry") {
+    if (isLender) return mine ? "Entregaste" : "Te pidió";
+    return mine ? "Pediste" : "Te entregó";
+  }
+  if (isLender) return mine ? "Registraste un cobro" : "Te pagó";
+  return mine ? "Pagaste" : "Registró tu pago";
+}
+
 function Stat({
   label,
   value,
   tone,
+  note,
 }: {
   label: string;
   value: string;
   tone?: "income" | "expense";
+  note?: string;
 }) {
   return (
     <article className="grid gap-2 rounded-xl border bg-card p-5">
@@ -482,6 +508,7 @@ function Stat({
       >
         {value}
       </p>
+      {note && <p className="text-[13px] text-warning">{note}</p>}
     </article>
   );
 }

@@ -15,6 +15,8 @@ export type LoanTerms = {
   installments: number | null;
   firstDueOn: string | null;
   payDay: number | null;
+  /** Cuenta libre: fecha de la primera entrega. No hay vencimientos en o antes de esa fecha. */
+  startsOn?: string | null;
 };
 
 /** Total a devolver: lo prestado (aceptado) más el interés. */
@@ -91,8 +93,11 @@ export function loanDueInMonth(
   const balance = Math.max(owed - paid, 0);
   if (owed <= 0) return null;
   const day = Math.min(terms.payDay, daysInMonth(ym));
+  const dueOn = `${formatYearMonth(ym)}-${String(day).padStart(2, "0")}`;
+  // El primer pago es el día de pago siguiente a la primera entrega (antes no había deuda).
+  if (terms.startsOn && dueOn <= terms.startsOn) return null;
   return {
-    dueOn: `${formatYearMonth(ym)}-${String(day).padStart(2, "0")}`,
+    dueOn,
     amount: balance,
     remaining: balance,
     label: "Saldo de la cuenta libre",
@@ -103,6 +108,18 @@ export function loanDueInMonth(
 export function maskName(name: string) {
   const [first, ...rest] = name.trim().split(/\s+/);
   return [first, ...rest.map((part) => `${part[0]?.toUpperCase()}.`)].join(" ");
+}
+
+/** Próximo día de pago de una cuenta libre: el primero después de la primera entrega y desde hoy. */
+export function openNextDue(payDay: number, startsOn: string, today: string) {
+  const from = today > startsOn ? today : startsOn;
+  const start = parseDate(from);
+  for (let i = 0; i < 2; i++) {
+    const ym = addMonths(start, i);
+    const dueOn = `${formatYearMonth(ym)}-${String(Math.min(payDay, daysInMonth(ym))).padStart(2, "0")}`;
+    if (dueOn > startsOn && dueOn >= today) return dueOn;
+  }
+  return null;
 }
 
 /** Porcentaje escrito por el usuario ("5", "2.5") → puntos básicos. */

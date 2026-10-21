@@ -15,13 +15,9 @@ import { getLoansPage, type LoanSummary } from "@/lib/data/loans";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/money";
 import { formatDate } from "@/lib/schedule";
-import {
-  LoanForm,
-  RespondLoanForm,
-  RespondPaymentForm,
-  RespondRequestForm,
-} from "./forms";
-import { describeTerms, LOAN_STATUS } from "./labels";
+import { LoanForm } from "./forms";
+import { RespondRows } from "./respond-rows";
+import { LOAN_STATUS } from "./labels";
 
 export const metadata: Metadata = { title: "Préstamos" };
 
@@ -118,116 +114,16 @@ function PendingActions({ data }: { data: Data }) {
         Por responder
       </h2>
       <ul className="divide-y rounded-xl border border-warning/40 bg-card">
-        {data.actions.flatMap((loan) => [
-          ...(loan.myActions.acceptLoan
-            ? [
-                <ActionRow
-                  key={`loan-${loan.id}`}
-                  title={
-                    loan.type === "open"
-                      ? `${loan.counterpart} te abrió una cuenta libre`
-                      : `${loan.counterpart} te quiere prestar ${formatMoney(loan.principal, loan.currency)}`
-                  }
-                  detail={describeTerms(loan)}
-                  action={
-                    <Modal
-                      title={
-                        loan.type === "open"
-                          ? "Cuenta libre"
-                          : "Préstamo recibido"
-                      }
-                      description={describeTerms(loan)}
-                      trigger={{
-                        variant: "primary",
-                        className: "h-10 px-3",
-                        label: "Responder",
-                      }}
-                    >
-                      <RespondLoanForm
-                        loanId={loan.id}
-                        currency={loan.currency}
-                        sources={data.sources}
-                        amount={loan.principal}
-                        defaultAccountId={data.defaultCashId}
-                      />
-                    </Modal>
-                  }
-                />,
-              ]
-            : []),
-          ...loan.myActions.acceptEntries.map((entry) => (
-            <ActionRow
-              key={`entry-${entry.id}`}
-              title={`${loan.counterpart} te pide ${formatMoney(entry.amount, loan.currency)}`}
-              detail={entry.note ?? "Cuenta libre"}
-              action={
-                <Modal
-                  title={`Pedido de ${loan.counterpart}`}
-                  description={`${formatMoney(entry.amount, loan.currency)}${entry.note ? ` · ${entry.note}` : ""}`}
-                  trigger={{
-                    variant: "primary",
-                    className: "h-10 px-3",
-                    label: "Responder",
-                  }}
-                >
-                  <RespondRequestForm
-                    entryId={entry.id}
-                    currency={loan.currency}
-                    sources={data.sources}
-                    defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
-                  />
-                </Modal>
-              }
-            />
-          )),
-          ...loan.myActions.confirmPayments.map((payment) => (
-            <ActionRow
-              key={`payment-${payment.id}`}
-              title={`${loan.counterpart} dice que te pagó ${formatMoney(payment.amount, loan.currency)}`}
-              detail={`El ${formatDate(payment.paidOn)}${payment.note ? ` · ${payment.note}` : ""}`}
-              action={
-                <Modal
-                  title="Confirmar abono"
-                  description={`${formatMoney(payment.amount, loan.currency)} de ${loan.counterpart}`}
-                  trigger={{
-                    variant: "primary",
-                    className: "h-10 px-3",
-                    label: "Revisar",
-                  }}
-                >
-                  <RespondPaymentForm
-                    paymentId={payment.id}
-                    currency={loan.currency}
-                    sources={data.sources}
-                    defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
-                  />
-                </Modal>
-              }
-            />
-          )),
-        ])}
+        {data.actions.map((loan) => (
+          <RespondRows
+            key={loan.id}
+            loan={loan}
+            sources={data.sources}
+            defaultCashId={data.defaultCashId}
+          />
+        ))}
       </ul>
     </section>
-  );
-}
-
-function ActionRow({
-  title,
-  detail,
-  action,
-}: {
-  title: string;
-  detail: string;
-  action: React.ReactNode;
-}) {
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-      <div className="min-w-0">
-        <p className="font-medium">{title}</p>
-        <p className="text-[13px] text-muted-foreground">{detail}</p>
-      </div>
-      {action}
-    </li>
   );
 }
 
@@ -295,7 +191,11 @@ function LoanCard({ loan }: { loan: LoanSummary }) {
         <div className="flex items-end justify-between gap-3">
           <div>
             <p className="text-[13px] text-muted-foreground">
-              {loan.role === "lender" ? "Te debe" : "Debes"}
+              {loan.status === "active" || loan.status === "pending"
+                ? loan.role === "lender"
+                  ? "Te debe"
+                  : "Debes"
+                : "Saldo"}
             </p>
             <p className="text-[22px] font-semibold tracking-[-0.01em] tabular-nums">
               {formatMoney(

@@ -18,14 +18,14 @@ import {
 } from "@/lib/money";
 import { formatDate } from "@/lib/schedule";
 import {
+  closeLoan,
   createLoan,
-  giveMoney,
   lookupBorrower,
-  registerPayment,
-  requestMoney,
+  respondEntry,
   respondLoan,
   respondPayment,
-  respondRequest,
+  saveEntry,
+  savePayment,
 } from "./actions";
 
 function Submit({
@@ -438,68 +438,117 @@ export function RespondLoanForm({
   );
 }
 
-export function RequestMoneyForm({
+/* ───────────── Entregas y pedidos (cuenta libre) ───────────── */
+
+export type EditDefaults = {
+  id: string;
+  amount: number;
+  note: string | null;
+  accountId: string | null;
+};
+
+/**
+ * Deudor: pide dinero. Prestamista: entrega dinero. Con `edit`, corrige uno pendiente.
+ * Siempre queda pendiente hasta que la otra persona lo acepte.
+ */
+export function EntryForm({
   loanId,
+  role,
   currency,
+  sources,
+  defaultAccountId,
   available,
+  edit,
 }: {
   loanId: string;
+  role: "lender" | "borrower";
   currency: string;
-  available: number | null;
+  sources: PaymentSource[];
+  defaultAccountId: string | null;
+  available?: number | null;
+  edit?: EditDefaults;
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
-    requestMoney,
-    "Pedido enviado",
+    saveEntry,
+    edit
+      ? "Cambios guardados: sigue pendiente"
+      : role === "lender"
+        ? "Entrega enviada: falta que la confirme"
+        : "Pedido enviado",
   );
+  const isLender = role === "lender";
   return (
     <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
       <input type="hidden" name="loanId" value={loanId} />
+      {edit && <input type="hidden" name="entryId" value={edit.id} />}
       <Field
         label={`Monto (${currencySymbol(currency)})`}
         name="amount"
         inputMode="decimal"
         autoComplete="off"
         placeholder="0.00"
+        defaultValue={edit ? centsToInput(edit.amount) : ""}
         hint={
-          available !== null
-            ? `Puedes pedir hasta ${formatMoney(available, currency)}.`
+          !isLender && available !== null && available !== undefined
+            ? `Puedes pedir hasta ${formatMoney(available + (edit?.amount ?? 0), currency)}.`
             : undefined
         }
         error={state.fieldErrors?.amount}
       />
       <Field
-        label="¿Para qué? (opcional)"
+        label={isLender ? "Nota (opcional)" : "¿Para qué? (opcional)"}
         name="note"
         autoComplete="off"
         maxLength={120}
+        defaultValue={edit?.note ?? ""}
       />
-      <Submit pending={pending}>Enviar pedido</Submit>
+      <AccountSelect
+        label={isLender ? "¿De qué cuenta sale?" : "¿A qué cuenta te llega?"}
+        name="accountId"
+        sources={sources}
+        currency={currency}
+        excludeTypes={["credit"]}
+        defaultValue={edit ? edit.accountId : defaultAccountId}
+        noneLabel="No registrar en mis cuentas"
+        hint="El dinero se mueve solo cuando la otra persona lo acepte."
+        error={state.fieldErrors?.accountId}
+      />
+      <Submit pending={pending}>
+        {edit ? "Guardar cambios" : isLender ? "Entregar" : "Enviar pedido"}
+      </Submit>
     </form>
   );
 }
 
-/* ───────────── Prestamista ───────────── */
-
-export function RespondRequestForm({
+/** Responder a un pedido o una entrega creada por la otra persona. */
+export function RespondEntryForm({
   entryId,
+  role,
   currency,
   sources,
   defaultAccountId,
 }: {
   entryId: string;
+  /** Mi rol en el préstamo. */
+  role: "lender" | "borrower";
   currency: string;
   sources: PaymentSource[];
   defaultAccountId: string | null;
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
-    respondRequest,
-    "Pedido respondido",
+    respondEntry,
+    "Respuesta enviada",
   );
+  const isLender = role === "lender";
   return (
     <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
       <input type="hidden" name="entryId" value={entryId} />
       <AccountSelect
-        label="¿De qué cuenta sale el dinero?"
+        label={
+          isLender
+            ? "¿De qué cuenta sale el dinero?"
+            : "¿A qué cuenta te llegó?"
+        }
         name="accountId"
         sources={sources}
         currency={currency}
@@ -508,94 +557,20 @@ export function RespondRequestForm({
         noneLabel="No registrar en mis cuentas"
         error={state.fieldErrors?.accountId}
       />
-      <DecisionButtons pending={pending} acceptLabel="Aceptar y entregar" />
+      <DecisionButtons
+        pending={pending}
+        acceptLabel={isLender ? "Aceptar y entregar" : "Confirmar"}
+      />
     </form>
   );
 }
 
-export function GiveMoneyForm({
-  loanId,
-  currency,
-  sources,
-  defaultAccountId,
-}: {
-  loanId: string;
-  currency: string;
-  sources: PaymentSource[];
-  defaultAccountId: string | null;
-}) {
-  const { state, formAction, pending, formRef } = useModalFormAction(
-    giveMoney,
-    "Entrega registrada",
-  );
-  return (
-    <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
-      <input type="hidden" name="loanId" value={loanId} />
-      <Field
-        label={`Monto (${currencySymbol(currency)})`}
-        name="amount"
-        inputMode="decimal"
-        autoComplete="off"
-        placeholder="0.00"
-        error={state.fieldErrors?.amount}
-      />
-      <Field
-        label="Nota (opcional)"
-        name="note"
-        autoComplete="off"
-        maxLength={120}
-      />
-      <AccountSelect
-        label="¿De qué cuenta sale?"
-        name="accountId"
-        sources={sources}
-        currency={currency}
-        excludeTypes={["credit"]}
-        defaultValue={defaultAccountId}
-        noneLabel="No registrar en mis cuentas"
-        error={state.fieldErrors?.accountId}
-      />
-      <Submit pending={pending}>Entregar</Submit>
-    </form>
-  );
-}
+/* ───────────── Abonos ───────────── */
 
-export function RespondPaymentForm({
-  paymentId,
-  currency,
-  sources,
-  defaultAccountId,
-}: {
-  paymentId: string;
-  currency: string;
-  sources: PaymentSource[];
-  defaultAccountId: string | null;
-}) {
-  const { state, formAction, pending, formRef } = useModalFormAction(
-    respondPayment,
-    "Abono respondido",
-  );
-  return (
-    <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
-      <input type="hidden" name="paymentId" value={paymentId} />
-      <AccountSelect
-        label="¿A qué cuenta te llegó?"
-        name="accountId"
-        sources={sources}
-        currency={currency}
-        excludeTypes={["credit"]}
-        defaultValue={defaultAccountId}
-        noneLabel="No registrar en mis cuentas"
-        hint="Rechaza solo si no recibiste el dinero: se le devuelve a su cuenta."
-        error={state.fieldErrors?.accountId}
-      />
-      <DecisionButtons pending={pending} acceptLabel="Confirmar" />
-    </form>
-  );
-}
-
-/* ───────────── Abonos (ambas partes) ───────────── */
-
+/**
+ * Deudor: "pagué". Prestamista: "me pagó". Con `edit`, corrige uno pendiente.
+ * Queda pendiente hasta que la otra persona lo confirme (salvo préstamos a externos).
+ */
 export function PaymentForm({
   loanId,
   role,
@@ -603,6 +578,8 @@ export function PaymentForm({
   sources,
   defaultAmount,
   defaultAccountId,
+  external = false,
+  edit,
 }: {
   loanId: string;
   role: "lender" | "borrower";
@@ -610,45 +587,55 @@ export function PaymentForm({
   sources: PaymentSource[];
   defaultAmount?: number;
   defaultAccountId: string | null;
+  external?: boolean;
+  edit?: EditDefaults;
 }) {
+  const isLender = role === "lender";
   const { state, formAction, pending, formRef } = useModalFormAction(
-    registerPayment,
-    role === "lender"
-      ? "Cobro registrado"
-      : "Abono enviado: falta que lo confirmen",
+    savePayment,
+    edit
+      ? "Cambios guardados: sigue pendiente"
+      : external
+        ? "Cobro registrado"
+        : "Registrado: falta que la otra persona lo confirme",
   );
   return (
     <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
       <input type="hidden" name="loanId" value={loanId} />
+      {edit && <input type="hidden" name="paymentId" value={edit.id} />}
       <Field
         label={`Monto (${currencySymbol(currency)})`}
         name="amount"
         inputMode="decimal"
         autoComplete="off"
         placeholder="0.00"
-        defaultValue={defaultAmount ? centsToInput(defaultAmount) : ""}
+        defaultValue={
+          edit
+            ? centsToInput(edit.amount)
+            : defaultAmount
+              ? centsToInput(defaultAmount)
+              : ""
+        }
         error={state.fieldErrors?.amount}
       />
       <AccountSelect
         label={
-          role === "lender"
-            ? "¿A qué cuenta te llegó?"
-            : "¿Desde qué cuenta pagas?"
+          isLender ? "¿A qué cuenta te llegó?" : "¿Desde qué cuenta pagas?"
         }
         name="accountId"
         sources={sources}
         currency={currency}
         excludeTypes={["credit"]}
-        defaultValue={defaultAccountId}
+        defaultValue={edit ? edit.accountId : defaultAccountId}
         noneLabel={
-          role === "lender"
+          isLender
             ? "No registrar en mis cuentas"
             : "Pagué en efectivo / no registrar"
         }
         hint={
-          role === "borrower"
-            ? "La otra persona confirmará que lo recibió."
-            : undefined
+          external
+            ? undefined
+            : "El dinero se mueve cuando la otra persona lo confirme."
         }
         error={state.fieldErrors?.accountId}
       />
@@ -657,10 +644,133 @@ export function PaymentForm({
         name="note"
         autoComplete="off"
         maxLength={120}
+        defaultValue={edit?.note ?? ""}
       />
       <Submit pending={pending}>
-        {role === "lender" ? "Registrar cobro" : "Registrar pago"}
+        {edit
+          ? "Guardar cambios"
+          : isLender
+            ? "Registrar cobro"
+            : "Registrar pago"}
       </Submit>
+    </form>
+  );
+}
+
+/** Confirmar o rechazar un abono registrado por la otra persona. */
+export function RespondPaymentForm({
+  paymentId,
+  role,
+  currency,
+  sources,
+  defaultAccountId,
+}: {
+  paymentId: string;
+  /** Mi rol en el préstamo. */
+  role: "lender" | "borrower";
+  currency: string;
+  sources: PaymentSource[];
+  defaultAccountId: string | null;
+}) {
+  const { state, formAction, pending, formRef } = useModalFormAction(
+    respondPayment,
+    "Respuesta enviada",
+  );
+  const isLender = role === "lender";
+  return (
+    <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
+      <input type="hidden" name="paymentId" value={paymentId} />
+      <AccountSelect
+        label={isLender ? "¿A qué cuenta te llegó?" : "¿De qué cuenta salió?"}
+        name="accountId"
+        sources={sources}
+        currency={currency}
+        excludeTypes={["credit"]}
+        defaultValue={defaultAccountId}
+        noneLabel="No registrar en mis cuentas"
+        hint="Rechaza si no es correcto: la otra persona podrá corregirlo."
+        error={state.fieldErrors?.accountId}
+      />
+      <DecisionButtons pending={pending} acceptLabel="Confirmar" />
+    </form>
+  );
+}
+
+/* ───────────── Eliminar (cerrar) préstamo ───────────── */
+
+/** Pregunta si la otra persona pagó todo antes de cerrar el préstamo. */
+export function CloseLoanForm({
+  loanId,
+  counterpart,
+  balance,
+  currency,
+  sources,
+  defaultAccountId,
+}: {
+  loanId: string;
+  counterpart: string;
+  balance: number;
+  currency: string;
+  sources: PaymentSource[];
+  defaultAccountId: string | null;
+}) {
+  const { state, formAction, pending, formRef } = useModalFormAction(
+    closeLoan,
+    "Préstamo eliminado",
+  );
+  const owes = balance > 0;
+  return (
+    <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
+      <input type="hidden" name="loanId" value={loanId} />
+      <p className="text-[17px] font-medium">
+        {owes
+          ? `¿${counterpart} te llegó a pagar todo el monto (${formatMoney(balance, currency)})?`
+          : `${counterpart} ya pagó todo. ¿Eliminar el préstamo?`}
+      </p>
+      {owes && (
+        <AccountSelect
+          label="Si te pagó, ¿a qué cuenta te llegó?"
+          name="accountId"
+          sources={sources}
+          currency={currency}
+          excludeTypes={["credit"]}
+          defaultValue={defaultAccountId}
+          noneLabel="No registrar en mis cuentas"
+          error={state.fieldErrors?.accountId}
+        />
+      )}
+      <p className="text-[13px] text-muted-foreground">
+        El préstamo pasa al historial de ambos y ya no tendrá pagos pendientes.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {owes && (
+          <Button
+            type="submit"
+            name="decision"
+            value="forgive"
+            variant="secondary"
+            size="lg"
+            disabled={pending}
+          >
+            No, eliminar sin cobrar
+          </Button>
+        )}
+        <Button
+          type="submit"
+          name="decision"
+          value="paid"
+          size="lg"
+          disabled={pending}
+          className={owes ? undefined : "sm:col-span-2"}
+        >
+          {pending ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+          ) : (
+            <Check className="size-4" aria-hidden />
+          )}
+          {owes ? "Sí, me pagó todo" : "Eliminar préstamo"}
+        </Button>
+      </div>
     </form>
   );
 }

@@ -188,7 +188,7 @@ async function Dashboard({
           </nav>
         </div>
 
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+        <div className="grid gap-6">
           {data.agenda.length === 0 ? (
             <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
               No hay pagos este mes. Agrega cuotas o servicios en{" "}
@@ -423,7 +423,7 @@ function DashboardSkeleton() {
           <span key={i} className="h-[106px] rounded-xl bg-muted" />
         ))}
       </div>
-      <div className="grid gap-6 xl:grid-cols-[1fr_1.25fr]">
+      <div className="grid gap-6">
         <span className="h-72 rounded-xl bg-muted" />
         <span className="h-72 rounded-xl bg-muted" />
       </div>

@@ -3,7 +3,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { recurringPayments } from "@/lib/db/schema";
 import {
-  occurrenceInMonth,
+  occurrencesInMonth,
   totalInstallments,
   type YearMonth,
 } from "@/lib/schedule";
@@ -33,6 +33,7 @@ export type AgendaItem =
   | (Base & {
       kind: "plan";
       planId: string;
+      installment: number;
       recordId: string | null;
       accountId: string | null;
     })
@@ -52,6 +53,7 @@ export type AgendaItem =
       loanId: string;
       role: "lender" | "borrower";
       accountId: string | null;
+      external: boolean;
     });
 
 /** Marcas informativas del calendario (no son pagos): días de corte de las tarjetas. */
@@ -69,7 +71,13 @@ function installmentLabel(
   frequency: string,
 ) {
   if (frequency === "once") return "Pago único";
-  if (total === null) return frequency === "monthly" ? "Mensual" : "Anual";
+  if (total === null) {
+    return frequency === "monthly"
+      ? "Mensual"
+      : frequency === "semimonthly"
+        ? "Quincenal"
+        : "Anual";
+  }
   return `Cuota ${installment} de ${total}`;
 }
 
@@ -96,35 +104,36 @@ export async function buildAgenda(
   const markers: CalendarMarker[] = [];
 
   for (const plan of plans) {
-    const occurrence = occurrenceInMonth(plan, ym);
-    if (!occurrence) continue;
-    const record = plan.records.find(
-      (r) => r.installment === occurrence.installment,
-    );
-    items.push({
-      kind: "plan",
-      key: `plan:${plan.id}`,
-      planId: plan.id,
-      recordId: record?.id ?? null,
-      accountId: plan.accountId,
-      name: plan.name,
-      detail: [
-        installmentLabel(
-          occurrence.installment,
-          totalInstallments(plan),
-          plan.frequency,
-        ),
-        plan.category?.name,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      amount: plan.amount,
-      currency: plan.currency,
-      dueOn: occurrence.dueOn,
-      status: statusFor(occurrence.dueOn, today, Boolean(record)),
-      paidOn: record?.paidOn ?? null,
-      direction: "out",
-    });
+    for (const occurrence of occurrencesInMonth(plan, ym)) {
+      const record = plan.records.find(
+        (r) => r.installment === occurrence.installment,
+      );
+      items.push({
+        kind: "plan",
+        key: `plan:${plan.id}:${occurrence.installment}`,
+        planId: plan.id,
+        installment: occurrence.installment,
+        recordId: record?.id ?? null,
+        accountId: plan.accountId,
+        name: plan.name,
+        detail: [
+          installmentLabel(
+            occurrence.installment,
+            totalInstallments(plan),
+            plan.frequency,
+          ),
+          plan.category?.name,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        amount: plan.amount,
+        currency: plan.currency,
+        dueOn: occurrence.dueOn,
+        status: statusFor(occurrence.dueOn, today, Boolean(record)),
+        paidOn: record?.paidOn ?? null,
+        direction: "out",
+      });
+    }
   }
 
   for (const card of cards) {
@@ -174,6 +183,7 @@ export async function buildAgenda(
       loanId: loan.loanId,
       role: loan.role,
       accountId: loan.accountId,
+      external: loan.external,
       name: loan.name,
       detail: loan.detail,
       amount: paid ? loan.amount : loan.remaining,

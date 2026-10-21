@@ -5,13 +5,18 @@ import { loans } from "@/lib/db/schema";
 import {
   installmentStatus,
   loanDueInMonth,
+  openNextDue,
   loanSchedule,
   maskName,
   totalOwed,
 } from "@/lib/loans";
 import { todayIn, type YearMonth } from "@/lib/schedule";
 import { getCurrentUser } from "@/lib/session";
-import { accountBalances, defaultCashSource, toPaymentSources } from "./accounts";
+import {
+  accountBalances,
+  defaultCashSource,
+  toPaymentSources,
+} from "./accounts";
 
 // Las funciones sin getCurrentUser() son internas: quien llama ya resolvió al usuario.
 
@@ -61,14 +66,50 @@ function summarize(loan: LoanRow, userId: string, today: string) {
           paid,
         )
       : [];
-  const nextDue = schedule.find((c) => !c.paid) ?? null;
+  // Cuenta libre: vence todo el saldo en el próximo día de pago tras la primera entrega.
+  const startsOn =
+    loan.entries
+      .filter((e) => e.status === "accepted" && e.disbursedOn)
+      .map((e) => e.disbursedOn!)
+      .sort()[0] ?? null;
+  const openDueOn =
+    loan.type === "open" && loan.payDay && startsOn && owed - paid > 0
+      ? openNextDue(loan.payDay, startsOn, today)
+      : null;
+  // Un préstamo pagado o cerrado ya no tiene deuda ni próximos pagos.
+  const settled = loan.status !== "active" && loan.status !== "pending";
+  const nextDue = settled
+    ? null
+    : (schedule.find((c) => !c.paid) ??
+      (openDueOn
+        ? {
+            number: 1,
+            dueOn: openDueOn,
+            amount: owed - paid,
+            remaining: owed - paid,
+            paid: false,
+          }
+        : null));
 
-  // Lo que espera una respuesta mía.
+  // Todo empieza pendiente: lo creado por la otra parte espera mi respuesta;
+  // lo creado por mí lo puedo editar o cancelar hasta que me respondan.
+  const active = loan.status === "active";
   const myActions = {
     acceptLoan: role === "borrower" && loan.status === "pending",
-    acceptEntries:
-      role === "lender" && loan.status === "active" ? pendingEntries : [],
-    confirmPayments: role === "lender" ? pendingPayments : [],
+    respondEntries: active
+      ? pendingEntries.filter((e) => e.requestedBy !== userId)
+      : [],
+    respondPayments: active
+      ? pendingPayments.filter((p) => p.createdBy !== userId)
+      : [],
+  };
+  const myPending = {
+    entries: active
+      ? pendingEntries.filter((e) => e.requestedBy === userId)
+      : [],
+    payments: active
+      ? pendingPayments.filter((p) => p.createdBy === userId)
+      : [],
   };
 
   return {
@@ -92,19 +133,25 @@ function summarize(loan: LoanRow, userId: string, today: string) {
     lent,
     owed,
     paid,
-    balance: Math.max(owed - paid, 0),
+    balance: settled ? 0 : Math.max(owed - paid, 0),
     pendingRequested:
-      loan.type === "open" ? pendingEntries.reduce((sum, e) => sum + e.amount, 0) : 0,
+      loan.type === "open"
+        ? pendingEntries.reduce((sum, e) => sum + e.amount, 0)
+        : 0,
     schedule,
     nextDue,
     overdue: Boolean(nextDue && nextDue.dueOn < today),
+    startsOn,
     entries: loan.entries,
     payments: loan.payments,
     myActions,
+    myPending,
+    /** Abonos esperando confirmación (no cuentan como pagados hasta que se acepten). */
+    pendingPaid: pendingPayments.reduce((sum, p) => sum + p.amount, 0),
     actionCount:
       (myActions.acceptLoan ? 1 : 0) +
-      myActions.acceptEntries.length +
-      myActions.confirmPayments.length,
+      myActions.respondEntries.length +
+      myActions.respondPayments.length,
   };
 }
 
@@ -162,7 +209,10 @@ export async function getLoanDetail(loanId: string) {
     today,
     loan: summarize(rows[0], user.id, today),
     sources: toPaymentSources(accounts),
-    defaultCashId: defaultCashSource(toPaymentSources(accounts), rows[0].currency),
+    defaultCashId: defaultCashSource(
+      toPaymentSources(accounts),
+      rows[0].currency,
+    ),
   };
 }
 
@@ -191,6 +241,8 @@ export type LoanAgendaItem = {
   currency: string;
   /** Cuenta sugerida para pagar (deudor) o recibir (prestamista). */
   accountId: string | null;
+  /** Préstamo a alguien que no usa la app (no hay quien confirme). */
+  external: boolean;
 };
 
 /** Pagos de préstamos que vencen en el mes: los que debo pagar y los que me deben pagar. */
@@ -208,7 +260,10 @@ export async function loanAgenda(
   const items: LoanAgendaItem[] = [];
   for (const row of rows) {
     const loan = summarize(row, userId, today);
-    const due = loanDueInMonth(loan, ym, { owed: loan.owed, paid: loan.paid });
+    const due = loanDueInMonth({ ...loan, startsOn: loan.startsOn }, ym, {
+      owed: loan.owed,
+      paid: loan.paid,
+    });
     if (!due) continue;
     items.push({
       loanId: loan.id,
@@ -224,6 +279,7 @@ export async function loanAgenda(
       currency: loan.currency,
       accountId:
         loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId,
+      external: loan.isExternal,
     });
   }
   return items;

@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, or } from "drizzle-orm";
 import { refresh } from "next/cache";
 import { z } from "zod";
 import type { FormState } from "@/app/(app)/actions";
@@ -269,6 +269,7 @@ export async function createLoan(
         loanId: loan.id,
         amount: principal,
         requestedBy: me.id,
+        accountId: account.id,
         status: external ? "accepted" : "pending",
         disbursedOn: external ? todayIn() : null,
         lenderTransactionId: lenderTx,
@@ -389,171 +390,202 @@ export async function respondLoan(
   return { ok: true };
 }
 
-/* ───────────── Cuenta libre: pedidos y entregas ───────────── */
+/* ───────────── Entregas y pedidos (cuenta libre) ───────────── */
+//
+// Todo empieza "pendiente" y lo acepta la otra parte. El dinero se mueve solo al aceptar:
+// - El deudor pide → el prestamista acepta y elige de qué cuenta sale.
+// - El prestamista entrega → el deudor confirma y elige a qué cuenta le llega.
+// Mientras está pendiente, quien lo creó puede editarlo o cancelarlo.
 
-/** El deudor pide dinero en su cuenta libre; el prestamista lo acepta o rechaza. */
-export async function requestMoney(
+const amountNote = z.object({
+  amount: money("el monto"),
+  note: z.string().trim().max(120),
+});
+
+async function loanParty(loanId: string, userId: string) {
+  const [loan] = await db
+    .select()
+    .from(loans)
+    .where(eq(loans.id, loanId))
+    .limit(1);
+  if (!loan) return null;
+  const role =
+    loan.lenderId === userId
+      ? "lender"
+      : loan.borrowerId === userId
+        ? "borrower"
+        : null;
+  return role ? { loan, role: role as "lender" | "borrower" } : null;
+}
+
+async function checkLimit(
+  loan: typeof loans.$inferSelect,
+  amount: number,
+  ignoreEntryId?: string,
+) {
+  if (!loan.creditLimit) return null;
+  const entries = await db
+    .select()
+    .from(loanEntries)
+    .where(
+      and(eq(loanEntries.loanId, loan.id), ne(loanEntries.status, "rejected")),
+    );
+  const used = entries
+    .filter((e) => e.id !== ignoreEntryId)
+    .reduce((sum, e) => sum + e.amount, 0);
+  return used + amount > loan.creditLimit
+    ? "Supera el límite de la cuenta libre."
+    : null;
+}
+
+/** Crea (o edita, si viene `entryId`) un pedido del deudor o una entrega del prestamista. */
+export async function saveEntry(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
   const me = await getCurrentUser();
-  const loan = await loanFor(String(formData.get("loanId")), me.id, "borrower");
-  if (!loan || loan.type !== "open" || loan.status !== "active") {
+  const party = await loanParty(String(formData.get("loanId")), me.id);
+  if (!party || party.loan.type !== "open" || party.loan.status !== "active") {
     return { ok: false, error: "Esta cuenta libre no está activa." };
   }
-  const parsed = z
-    .object({ amount: money("el monto"), note: z.string().trim().max(120) })
-    .safeParse({
-      amount: formData.get("amount") ?? "",
-      note: formData.get("note") ?? "",
-    });
+  const parsed = amountNote.safeParse({
+    amount: formData.get("amount") ?? "",
+    note: formData.get("note") ?? "",
+  });
   if (!parsed.success) return fieldErrors(parsed.error);
+  const account = await cashAccount(
+    me.id,
+    String(formData.get("accountId") ?? ""),
+    party.loan.currency,
+  );
+  if ("error" in account)
+    return { ok: false, fieldErrors: { accountId: account.error! } };
 
-  if (loan.creditLimit) {
-    const entries = await db
+  const entryId = String(formData.get("entryId") ?? "");
+  if (entryId) {
+    const [entry] = await db
       .select()
       .from(loanEntries)
-      .where(
-        and(
-          eq(loanEntries.loanId, loan.id),
-          ne(loanEntries.status, "rejected"),
-        ),
-      );
-    const used = entries.reduce((s, e) => s + e.amount, 0);
-    if (used + parsed.data.amount > loan.creditLimit) {
-      return {
-        ok: false,
-        fieldErrors: { amount: "Supera el límite de la cuenta libre." },
-      };
+      .where(eq(loanEntries.id, entryId));
+    if (
+      !entry ||
+      entry.loanId !== party.loan.id ||
+      entry.requestedBy !== me.id
+    ) {
+      return { ok: false, error: "No puedes editar este movimiento." };
     }
+    if (entry.status !== "pending") {
+      return { ok: false, error: "Ya fue aceptado: no se puede editar." };
+    }
+    const overLimit = await checkLimit(
+      party.loan,
+      parsed.data.amount,
+      entry.id,
+    );
+    if (overLimit) return { ok: false, fieldErrors: { amount: overLimit } };
+    await db
+      .update(loanEntries)
+      .set({
+        amount: parsed.data.amount,
+        note: parsed.data.note || null,
+        accountId: account.id,
+      })
+      .where(eq(loanEntries.id, entry.id));
+  } else {
+    const overLimit = await checkLimit(party.loan, parsed.data.amount);
+    if (overLimit) return { ok: false, fieldErrors: { amount: overLimit } };
+    await db.insert(loanEntries).values({
+      loanId: party.loan.id,
+      amount: parsed.data.amount,
+      note: parsed.data.note || null,
+      requestedBy: me.id,
+      accountId: account.id,
+      status: "pending",
+    });
   }
-
-  await db.insert(loanEntries).values({
-    loanId: loan.id,
-    amount: parsed.data.amount,
-    note: parsed.data.note || null,
-    requestedBy: me.id,
-    status: "pending",
-  });
   refresh();
   return { ok: true };
 }
 
-/** El prestamista acepta o rechaza un pedido de la cuenta libre. Al aceptar, se entrega el dinero. */
-export async function respondRequest(
+/** Quien creó el pedido o la entrega lo cancela mientras sigue pendiente. */
+export async function cancelEntry(entryId: string): Promise<FormState> {
+  const me = await getCurrentUser();
+  const [entry] = await db
+    .select()
+    .from(loanEntries)
+    .where(eq(loanEntries.id, entryId));
+  if (!entry || entry.requestedBy !== me.id)
+    return { ok: false, error: "No puedes cancelarlo." };
+  if (entry.status !== "pending") {
+    return { ok: false, error: "Ya fue aceptado: no se puede cancelar." };
+  }
+  await db.delete(loanEntries).where(eq(loanEntries.id, entry.id));
+  refresh();
+  return { ok: true };
+}
+
+/** La otra parte acepta (y se mueve el dinero) o rechaza un pedido o una entrega. */
+export async function respondEntry(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
   const me = await getCurrentUser();
-  const [row] = await db
-    .select({ entry: loanEntries, loan: loans })
+  const [entry] = await db
+    .select()
     .from(loanEntries)
-    .innerJoin(loans, eq(loans.id, loanEntries.loanId))
-    .where(
-      and(
-        eq(loanEntries.id, String(formData.get("entryId"))),
-        eq(loans.lenderId, me.id),
-      ),
-    )
+    .where(eq(loanEntries.id, String(formData.get("entryId"))))
     .limit(1);
-  if (!row || row.entry.status !== "pending")
-    return { ok: false, error: "Ese pedido ya fue respondido." };
+  const party = entry ? await loanParty(entry.loanId, me.id) : null;
+  if (!entry || !party || entry.requestedBy === me.id) {
+    return { ok: false, error: "No puedes responder esto." };
+  }
+  if (entry.status !== "pending")
+    return { ok: false, error: "Ya fue respondido." };
 
   if (formData.get("decision") !== "accept") {
     await db
       .update(loanEntries)
       .set({ status: "rejected", respondedAt: new Date() })
-      .where(eq(loanEntries.id, row.entry.id));
+      .where(eq(loanEntries.id, entry.id));
     refresh();
     return { ok: true };
   }
 
-  const account = await cashAccount(
+  const mine = await cashAccount(
     me.id,
     String(formData.get("accountId") ?? ""),
-    row.loan.currency,
+    party.loan.currency,
   );
-  if ("error" in account)
-    return { ok: false, fieldErrors: { accountId: account.error! } };
-  await disburse(row.loan, row.entry.id, row.entry.amount, account.id, me.name);
-  refresh();
-  return { ok: true };
-}
+  if ("error" in mine)
+    return { ok: false, fieldErrors: { accountId: mine.error! } };
 
-/** El prestamista entrega dinero en la cuenta libre sin que se lo pidan. */
-export async function giveMoney(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const me = await getCurrentUser();
-  const loan = await loanFor(String(formData.get("loanId")), me.id, "lender");
-  if (!loan || loan.type !== "open" || loan.status !== "active") {
-    return { ok: false, error: "Esta cuenta libre no está activa." };
-  }
-  const parsed = z
-    .object({ amount: money("el monto"), note: z.string().trim().max(120) })
-    .safeParse({
-      amount: formData.get("amount") ?? "",
-      note: formData.get("note") ?? "",
-    });
-  if (!parsed.success) return fieldErrors(parsed.error);
-  const account = await cashAccount(
-    me.id,
-    String(formData.get("accountId") ?? ""),
-    loan.currency,
-  );
-  if ("error" in account)
-    return { ok: false, fieldErrors: { accountId: account.error! } };
-
-  const [entry] = await db
-    .insert(loanEntries)
-    .values({
-      loanId: loan.id,
-      amount: parsed.data.amount,
-      note: parsed.data.note || null,
-      requestedBy: me.id,
-      status: "pending",
-    })
-    .returning({ id: loanEntries.id });
-  await disburse(loan, entry.id, parsed.data.amount, account.id, me.name);
-  refresh();
-  return { ok: true };
-}
-
-async function disburse(
-  loan: typeof loans.$inferSelect,
-  entryId: string,
-  amount: number,
-  lenderAccountId: string | null,
-  lenderName: string,
-) {
-  const borrowerAccount =
-    loan.borrowerId && loan.borrowerAccountId
-      ? await ownActiveAccount(loan.borrowerId, loan.borrowerAccountId)
-      : null;
-  const [borrower] = loan.borrowerId
-    ? await db
-        .select({ name: users.name })
-        .from(users)
-        .where(eq(users.id, loan.borrowerId))
-    : [];
+  const { loan } = party;
+  // Una cuenta la eligió quien creó la entrada; la otra, quien responde.
+  const lenderAccountId = party.role === "lender" ? mine.id : entry.accountId;
+  const borrowerAccountId =
+    party.role === "borrower" ? mine.id : entry.accountId;
+  const names = await partyNames(loan);
+  const lenderAccount = await stillOwned(loan.lenderId, lenderAccountId);
+  const borrowerAccount = loan.borrowerId
+    ? await stillOwned(loan.borrowerId, borrowerAccountId)
+    : null;
 
   await db.transaction(async (tx) => {
     const lenderTx = await moveMoney(tx, {
       userId: loan.lenderId,
-      accountId: lenderAccountId,
+      accountId: lenderAccount,
       kind: "loan_out",
-      amount,
-      description: `Préstamo a ${borrower?.name ?? loan.borrowerName ?? "otra persona"}`,
+      amount: entry.amount,
+      description: `Préstamo a ${names.borrower}`,
       loanId: loan.id,
     });
     const borrowerTx = loan.borrowerId
       ? await moveMoney(tx, {
           userId: loan.borrowerId,
-          accountId: borrowerAccount?.id ?? null,
+          accountId: borrowerAccount,
           kind: "loan_in",
-          amount,
-          description: `Préstamo de ${lenderName}`,
+          amount: entry.amount,
+          description: `Préstamo de ${names.lender}`,
           loanId: loan.id,
         })
       : null;
@@ -566,161 +598,332 @@ async function disburse(
         lenderTransactionId: lenderTx,
         borrowerTransactionId: borrowerTx,
       })
-      .where(eq(loanEntries.id, entryId));
+      .where(eq(loanEntries.id, entry.id));
   });
-}
-
-/* ───────────── Abonos ───────────── */
-
-/**
- * Registra un abono. Si lo registra el deudor, sale de su cuenta y queda pendiente hasta que
- * el prestamista lo confirme. Si lo registra el prestamista (cobró), queda confirmado.
- */
-export async function registerPayment(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const me = await getCurrentUser();
-  const loanId = String(formData.get("loanId"));
-  const [loan] = await db
-    .select()
-    .from(loans)
-    .where(eq(loans.id, loanId))
-    .limit(1);
-  const role =
-    loan?.lenderId === me.id
-      ? "lender"
-      : loan?.borrowerId === me.id
-        ? "borrower"
-        : null;
-  if (!loan || !role || loan.status !== "active")
-    return { ok: false, error: "Este préstamo no está activo." };
-
-  const parsed = z
-    .object({ amount: money("el monto"), note: z.string().trim().max(120) })
-    .safeParse({
-      amount: formData.get("amount") ?? "",
-      note: formData.get("note") ?? "",
-    });
-  if (!parsed.success) return fieldErrors(parsed.error);
-  const account = await cashAccount(
-    me.id,
-    String(formData.get("accountId") ?? ""),
-    loan.currency,
-  );
-  if ("error" in account)
-    return { ok: false, fieldErrors: { accountId: account.error! } };
-
-  const [counterpart] = await db
-    .select({ name: users.name })
-    .from(users)
-    .where(
-      eq(users.id, role === "lender" ? (loan.borrowerId ?? "") : loan.lenderId),
-    );
-  const otherName = counterpart?.name ?? loan.borrowerName ?? "otra persona";
-
-  await db.transaction(async (tx) => {
-    const movement = await moveMoney(tx, {
-      userId: me.id,
-      accountId: account.id,
-      kind: role === "lender" ? "loan_in" : "loan_out",
-      amount: parsed.data.amount,
-      description:
-        role === "lender" ? `Abono de ${otherName}` : `Abono a ${otherName}`,
-      loanId: loan.id,
-    });
-    await tx.insert(loanPayments).values({
-      loanId: loan.id,
-      amount: parsed.data.amount,
-      paidOn: todayIn(),
-      note: parsed.data.note || null,
-      createdBy: me.id,
-      // El deudor no puede darse por pagado solo: el prestamista confirma.
-      status: role === "lender" || !loan.borrowerId ? "accepted" : "pending",
-      lenderTransactionId: role === "lender" ? movement : null,
-      borrowerTransactionId: role === "borrower" ? movement : null,
-      respondedAt: role === "lender" ? new Date() : null,
-    });
-    if (role === "lender") await settleIfPaid(tx, loan.id);
-  });
-
   refresh();
   return { ok: true };
 }
 
-/** El prestamista confirma (y recibe en su cuenta) o rechaza un abono del deudor. */
-export async function respondPayment(
+/* ───────────── Abonos ───────────── */
+//
+// Lo registra el deudor ("pagué") o el prestamista ("me pagó"); la otra parte lo confirma.
+// Con una persona externa no hay quien confirme: se registra aceptado al instante.
+
+export async function savePayment(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
   const me = await getCurrentUser();
-  const [row] = await db
-    .select({ payment: loanPayments, loan: loans })
-    .from(loanPayments)
-    .innerJoin(loans, eq(loans.id, loanPayments.loanId))
-    .where(
-      and(
-        eq(loanPayments.id, String(formData.get("paymentId"))),
-        eq(loans.lenderId, me.id),
-      ),
-    )
-    .limit(1);
-  if (!row || row.payment.status !== "pending")
-    return { ok: false, error: "Ese abono ya fue respondido." };
+  const party = await loanParty(String(formData.get("loanId")), me.id);
+  if (!party || party.loan.status !== "active") {
+    return { ok: false, error: "Este préstamo no está activo." };
+  }
+  const parsed = amountNote.safeParse({
+    amount: formData.get("amount") ?? "",
+    note: formData.get("note") ?? "",
+  });
+  if (!parsed.success) return fieldErrors(parsed.error);
+  const account = await cashAccount(
+    me.id,
+    String(formData.get("accountId") ?? ""),
+    party.loan.currency,
+  );
+  if ("error" in account)
+    return { ok: false, fieldErrors: { accountId: account.error! } };
+  const { loan } = party;
 
-  if (formData.get("decision") !== "accept") {
+  const paymentId = String(formData.get("paymentId") ?? "");
+  if (paymentId) {
+    const [payment] = await db
+      .select()
+      .from(loanPayments)
+      .where(eq(loanPayments.id, paymentId));
+    if (!payment || payment.loanId !== loan.id || payment.createdBy !== me.id) {
+      return { ok: false, error: "No puedes editar este abono." };
+    }
+    if (payment.status !== "pending") {
+      return { ok: false, error: "Ya fue confirmado: no se puede editar." };
+    }
+    await db
+      .update(loanPayments)
+      .set({
+        amount: parsed.data.amount,
+        note: parsed.data.note || null,
+        accountId: account.id,
+      })
+      .where(eq(loanPayments.id, payment.id));
+    refresh();
+    return { ok: true };
+  }
+
+  // Préstamo a alguien externo: el prestamista registra el cobro directamente.
+  if (!loan.borrowerId) {
+    const names = await partyNames(loan);
     await db.transaction(async (tx) => {
-      await tx
-        .update(loanPayments)
-        .set({
-          status: "rejected",
-          respondedAt: new Date(),
-          borrowerTransactionId: null,
-        })
-        .where(eq(loanPayments.id, row.payment.id));
-      // Devuelve el dinero a la cuenta del deudor: su salida se anula.
-      if (row.payment.borrowerTransactionId) {
-        await tx
-          .delete(transactions)
-          .where(eq(transactions.id, row.payment.borrowerTransactionId));
-      }
+      const lenderTx = await moveMoney(tx, {
+        userId: me.id,
+        accountId: account.id,
+        kind: "loan_in",
+        amount: parsed.data.amount,
+        description: `Abono de ${names.borrower}`,
+        loanId: loan.id,
+      });
+      await tx.insert(loanPayments).values({
+        loanId: loan.id,
+        amount: parsed.data.amount,
+        paidOn: todayIn(),
+        note: parsed.data.note || null,
+        createdBy: me.id,
+        accountId: account.id,
+        status: "accepted",
+        lenderTransactionId: lenderTx,
+        respondedAt: new Date(),
+      });
+      await settleIfPaid(tx, loan.id);
     });
     refresh();
     return { ok: true };
   }
 
-  const account = await cashAccount(
+  await db.insert(loanPayments).values({
+    loanId: loan.id,
+    amount: parsed.data.amount,
+    paidOn: todayIn(),
+    note: parsed.data.note || null,
+    createdBy: me.id,
+    accountId: account.id,
+    status: "pending",
+  });
+  refresh();
+  return { ok: true };
+}
+
+export async function cancelPayment(paymentId: string): Promise<FormState> {
+  const me = await getCurrentUser();
+  const [payment] = await db
+    .select()
+    .from(loanPayments)
+    .where(eq(loanPayments.id, paymentId));
+  if (!payment || payment.createdBy !== me.id)
+    return { ok: false, error: "No puedes cancelarlo." };
+  if (payment.status !== "pending") {
+    return { ok: false, error: "Ya fue confirmado: no se puede cancelar." };
+  }
+  await db.delete(loanPayments).where(eq(loanPayments.id, payment.id));
+  refresh();
+  return { ok: true };
+}
+
+/** La otra parte confirma (y se mueve el dinero) o rechaza un abono. */
+export async function respondPayment(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const me = await getCurrentUser();
+  const [payment] = await db
+    .select()
+    .from(loanPayments)
+    .where(eq(loanPayments.id, String(formData.get("paymentId"))))
+    .limit(1);
+  const party = payment ? await loanParty(payment.loanId, me.id) : null;
+  if (!payment || !party || payment.createdBy === me.id) {
+    return { ok: false, error: "No puedes responder esto." };
+  }
+  if (payment.status !== "pending")
+    return { ok: false, error: "Ya fue respondido." };
+
+  if (formData.get("decision") !== "accept") {
+    await db
+      .update(loanPayments)
+      .set({ status: "rejected", respondedAt: new Date() })
+      .where(eq(loanPayments.id, payment.id));
+    refresh();
+    return { ok: true };
+  }
+
+  const mine = await cashAccount(
     me.id,
     String(formData.get("accountId") ?? ""),
-    row.loan.currency,
+    party.loan.currency,
   );
-  if ("error" in account)
-    return { ok: false, fieldErrors: { accountId: account.error! } };
-  const [borrower] = row.loan.borrowerId
-    ? await db
-        .select({ name: users.name })
-        .from(users)
-        .where(eq(users.id, row.loan.borrowerId))
-    : [];
+  if ("error" in mine)
+    return { ok: false, fieldErrors: { accountId: mine.error! } };
+  const { loan } = party;
+  const lenderAccountId = party.role === "lender" ? mine.id : payment.accountId;
+  const borrowerAccountId =
+    party.role === "borrower" ? mine.id : payment.accountId;
+  const names = await partyNames(loan);
+  const lenderAccount = await stillOwned(loan.lenderId, lenderAccountId);
+  const borrowerAccount = loan.borrowerId
+    ? await stillOwned(loan.borrowerId, borrowerAccountId)
+    : null;
 
   await db.transaction(async (tx) => {
     const lenderTx = await moveMoney(tx, {
-      userId: me.id,
-      accountId: account.id,
+      userId: loan.lenderId,
+      accountId: lenderAccount,
       kind: "loan_in",
-      amount: row.payment.amount,
-      description: `Abono de ${borrower?.name ?? "otra persona"}`,
-      loanId: row.loan.id,
+      amount: payment.amount,
+      description: `Abono de ${names.borrower}`,
+      loanId: loan.id,
     });
+    const borrowerTx = loan.borrowerId
+      ? await moveMoney(tx, {
+          userId: loan.borrowerId,
+          accountId: borrowerAccount,
+          kind: "loan_out",
+          amount: payment.amount,
+          description: `Abono a ${names.lender}`,
+          loanId: loan.id,
+        })
+      : null;
     await tx
       .update(loanPayments)
       .set({
         status: "accepted",
         respondedAt: new Date(),
+        paidOn: todayIn(),
         lenderTransactionId: lenderTx,
+        borrowerTransactionId: borrowerTx,
       })
-      .where(eq(loanPayments.id, row.payment.id));
-    await settleIfPaid(tx, row.loan.id);
+      .where(eq(loanPayments.id, payment.id));
+    await settleIfPaid(tx, loan.id);
+  });
+  refresh();
+  return { ok: true };
+}
+
+/* ───────────── Utilidades ───────────── */
+
+async function partyNames(loan: typeof loans.$inferSelect) {
+  const rows = await db
+    .select({ id: users.id, name: users.name })
+    .from(users)
+    .where(
+      loan.borrowerId
+        ? or(eq(users.id, loan.lenderId), eq(users.id, loan.borrowerId))
+        : eq(users.id, loan.lenderId),
+    );
+  return {
+    lender: rows.find((r) => r.id === loan.lenderId)?.name ?? "otra persona",
+    borrower:
+      rows.find((r) => r.id === loan.borrowerId)?.name ??
+      loan.borrowerName ??
+      "otra persona",
+  };
+}
+
+/** La cuenta elegida al crear pudo archivarse: si ya no es válida, no se registra el movimiento. */
+async function stillOwned(userId: string, accountId: string | null) {
+  if (!accountId) return null;
+  const account = await ownActiveAccount(userId, accountId);
+  return account && account.type !== "credit" ? account.id : null;
+}
+
+/* ───────────── Cerrar ───────────── */
+
+/**
+ * El prestamista elimina (cierra) un préstamo activo. Antes responde si le pagaron todo:
+ * - "paid": registra lo que faltaba como cobrado (opcionalmente en una cuenta) y lo marca pagado.
+ * - "forgive": no le pagaron el resto; se cierra igual y la deuda queda saldada.
+ * Lo pendiente sin responder se rechaza. El préstamo pasa al historial de ambas personas.
+ */
+export async function closeLoan(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const me = await getCurrentUser();
+  const loan = await loanFor(String(formData.get("loanId")), me.id, "lender");
+  if (!loan || loan.status !== "active")
+    return { ok: false, error: "Este préstamo no está activo." };
+
+  const paidAll = formData.get("decision") === "paid";
+  const account = await cashAccount(
+    me.id,
+    String(formData.get("accountId") ?? ""),
+    loan.currency,
+  );
+  if (paidAll && "error" in account)
+    return { ok: false, fieldErrors: { accountId: account.error! } };
+
+  const [entries, payments] = await Promise.all([
+    db
+      .select()
+      .from(loanEntries)
+      .where(
+        and(
+          eq(loanEntries.loanId, loan.id),
+          eq(loanEntries.status, "accepted"),
+        ),
+      ),
+    db
+      .select()
+      .from(loanPayments)
+      .where(
+        and(
+          eq(loanPayments.loanId, loan.id),
+          eq(loanPayments.status, "accepted"),
+        ),
+      ),
+  ]);
+  const balance =
+    totalOwed(
+      entries.reduce((s, e) => s + e.amount, 0),
+      loan.interestRate,
+    ) - payments.reduce((s, p) => s + p.amount, 0);
+  const names = await partyNames(loan);
+
+  await db.transaction(async (tx) => {
+    const now = new Date();
+    await tx
+      .update(loanEntries)
+      .set({ status: "rejected", respondedAt: now })
+      .where(
+        and(eq(loanEntries.loanId, loan.id), eq(loanEntries.status, "pending")),
+      );
+    await tx
+      .update(loanPayments)
+      .set({ status: "rejected", respondedAt: now })
+      .where(
+        and(
+          eq(loanPayments.loanId, loan.id),
+          eq(loanPayments.status, "pending"),
+        ),
+      );
+
+    if (paidAll && balance > 0) {
+      const lenderTx = await moveMoney(tx, {
+        userId: me.id,
+        accountId: "error" in account ? null : account.id,
+        kind: "loan_in",
+        amount: balance,
+        description: `Abono de ${names.borrower} (cierre)`,
+        loanId: loan.id,
+      });
+      await tx.insert(loanPayments).values({
+        loanId: loan.id,
+        amount: balance,
+        paidOn: todayIn(),
+        note: "Pagó todo el monto (cierre)",
+        createdBy: me.id,
+        accountId: "error" in account ? null : account.id,
+        status: "accepted",
+        lenderTransactionId: lenderTx,
+        respondedAt: now,
+      });
+    }
+    await tx
+      .update(loans)
+      .set({
+        status: paidAll ? "paid" : "cancelled",
+        respondedAt: now,
+        note: paidAll
+          ? loan.note
+          : [loan.note, "Cerrado sin cobrar el saldo"]
+              .filter(Boolean)
+              .join(" · "),
+      })
+      .where(eq(loans.id, loan.id));
   });
 
   refresh();

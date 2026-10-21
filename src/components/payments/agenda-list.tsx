@@ -235,6 +235,7 @@ function PaymentAction({
           sources={sources}
           defaultAmount={item.amount}
           defaultAccountId={item.accountId ?? defaultSourceId}
+          external={item.external}
         />
       </Modal>
     );
@@ -248,6 +249,7 @@ function PaymentAction({
     >
       <PayForm
         planId={item.planId}
+        installment={item.installment}
         monthKey={monthKey}
         currency={item.currency}
         sources={sources}

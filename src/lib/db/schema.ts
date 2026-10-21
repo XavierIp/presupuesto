@@ -23,6 +23,12 @@ const id = () =>
     .$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const cents = (name: string) => bigint(name, { mode: "number" });
+/** Se actualiza sola en cada `update` de Drizzle; la usa la sincronización en vivo. */
+const updatedAt = () =>
+  timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date());
 const userRef = (name = "user_id") =>
   text(name)
     .notNull()
@@ -50,7 +56,13 @@ export const loanType = pgEnum("loan_type", ["fixed", "open"]);
 /** Estado de solicitudes y abonos que la otra persona debe aceptar. */
 export const requestStatus = pgEnum("request_status", ["pending", "accepted", "rejected"]);
 export const groupRole = pgEnum("group_role", ["owner", "member"]);
-export const paymentFrequency = pgEnum("payment_frequency", ["monthly", "yearly", "once"]);
+/** `semimonthly`: quincenal, dos pagos al mes (día 15 y último día del mes). */
+export const paymentFrequency = pgEnum("payment_frequency", [
+  "monthly",
+  "yearly",
+  "once",
+  "semimonthly",
+]);
 
 /** Cuentas de dinero: efectivo, débito, crédito o ahorro. */
 export const financialAccounts = pgTable(
@@ -225,6 +237,7 @@ export const loans = pgTable(
     note: text("note"),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     index("loans_lender_idx").on(t.lenderId),
@@ -245,6 +258,8 @@ export const loanPayments = pgTable(
     /** Abono registrado por el deudor: queda `pending` hasta que el prestamista lo confirma. */
     status: requestStatus("status").notNull().default("accepted"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    /** Cuenta que eligió quien registró el abono; el dinero se mueve recién al aceptarse. */
+    accountId: text("account_id").references(() => financialAccounts.id, { onDelete: "set null" }),
     lenderTransactionId: text("lender_transaction_id").references(() => transactions.id, {
       onDelete: "set null",
     }),
@@ -253,6 +268,7 @@ export const loanPayments = pgTable(
     }),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [index("loan_payments_loan_idx").on(t.loanId)],
 );
@@ -272,6 +288,8 @@ export const loanEntries = pgTable(
     note: text("note"),
     status: requestStatus("status").notNull().default("pending"),
     requestedBy: text("requested_by").references(() => user.id, { onDelete: "set null" }),
+    /** Cuenta que eligió quien creó la entrega o el pedido; el dinero se mueve al aceptarse. */
+    accountId: text("account_id").references(() => financialAccounts.id, { onDelete: "set null" }),
     disbursedOn: date("disbursed_on", { mode: "string" }),
     lenderTransactionId: text("lender_transaction_id").references(() => transactions.id, {
       onDelete: "set null",
@@ -281,6 +299,7 @@ export const loanEntries = pgTable(
     }),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [index("loan_entries_loan_idx").on(t.loanId)],
 );

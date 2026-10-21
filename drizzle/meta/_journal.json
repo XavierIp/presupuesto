@@ -29,6 +29,27 @@
       "when": 1792555163960,
       "tag": "0003_natural_excalibur",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792556888132,
+      "tag": "0004_strange_wither",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792557940446,
+      "tag": "0005_old_flatman",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792558635623,
+      "tag": "0006_short_eternity",
+      "breakpoints": true
     }
   ]
 }

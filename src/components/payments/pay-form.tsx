@@ -10,12 +10,14 @@ import { payInstallment } from "@/app/(app)/presupuestos/actions";
 
 export function PayForm({
   planId,
+  installment,
   monthKey,
   currency,
   sources,
   defaultAccountId,
 }: {
   planId: string;
+  installment: number;
   monthKey: string;
   currency: string;
   sources: PaymentSource[];
@@ -45,6 +47,7 @@ export function PayForm({
     <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
       <input type="hidden" name="planId" value={planId} />
       <input type="hidden" name="month" value={monthKey} />
+      <input type="hidden" name="installment" value={installment} />
       <AccountSelect
         label="¿Con qué pagas?"
         name="accountId"
