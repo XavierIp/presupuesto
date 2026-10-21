@@ -39,6 +39,10 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
     autoSignIn: true,
+    // Restablecimiento sin correo (ver src/lib/recovery.ts): el enlace vence en 1 hora
+    // y al cambiar la contraseña se cierran las sesiones abiertas en otros dispositivos.
+    resetPasswordTokenExpiresIn: 60 * 60,
+    revokeSessionsOnPasswordReset: true,
   },
   user: {
     additionalFields: {
@@ -59,7 +63,8 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
-    cookieCache: { enabled: true, maxAge: 5 * 60 },
+    // Caché corta: al cambiar la contraseña, las sesiones revocadas dejan de servir en ≤ 1 minuto.
+    cookieCache: { enabled: true, maxAge: 60 },
   },
   databaseHooks: {
     user: {

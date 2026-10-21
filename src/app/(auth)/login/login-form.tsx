@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -43,6 +44,12 @@ export function LoginForm() {
         autoComplete="current-password"
         required
       />
+      <Link
+        href="/recuperar"
+        className="-mt-2 justify-self-end text-sm font-medium text-primary underline-offset-4 hover:underline"
+      >
+        ¿Olvidaste tu contraseña?
+      </Link>
       {error && (
         <p role="alert" className="rounded-lg bg-expense/10 px-3 py-2 text-sm text-expense">
           {error}

@@ -77,3 +77,15 @@ export const verification = pgTable(
   },
   (t) => [index("verification_identifier_idx").on(t.identifier)],
 );
+
+/**
+ * Código de recuperación de cada usuario (cifrado, como una contraseña).
+ * Permite restablecer la contraseña sin correo: correo + código. Se cambia al usarse.
+ */
+export const recoveryCode = pgTable("recovery_code", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

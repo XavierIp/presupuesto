@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { BottomNav, BottomNavFallback, SidebarNav, SidebarNavFallback } from "@/components/app-nav";
 import { Brand } from "@/components/brand";
 import { DniPrompt } from "@/components/dni-prompt";
+import { RecoveryPrompt } from "@/components/recovery-prompt";
 import { LiveSync } from "@/components/live-sync";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu, UserMenuSkeleton } from "@/components/user-menu";
@@ -33,6 +34,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10 lg:pb-12">
           <Suspense fallback={null}>
             <DniPrompt />
+          </Suspense>
+          <Suspense fallback={null}>
+            <RecoveryPrompt />
           </Suspense>
           {children}
         </main>

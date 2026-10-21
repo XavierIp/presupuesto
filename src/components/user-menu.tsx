@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Settings } from "lucide-react";
 import { getCurrentUser } from "@/lib/session";
 import { SignOutButton } from "./sign-out-button";
 
@@ -21,6 +23,13 @@ export async function UserMenu() {
         <p className="truncate text-sm font-medium">{user.name}</p>
         <p className="truncate text-[13px] text-muted-foreground">{user.email}</p>
       </div>
+      <Link
+        href="/mas"
+        aria-label="Cuenta y seguridad"
+        className="pressable inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        <Settings className="size-[18px]" strokeWidth={1.75} aria-hidden />
+      </Link>
       <SignOutButton />
     </div>
   );

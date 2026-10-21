@@ -24,7 +24,8 @@ export function LiveSync() {
 
     const refreshIfIdle = () => {
       if (!stale.current) return;
-      if (document.querySelector("dialog[open]")) return; // se reintenta en el próximo ciclo
+      // Con un modal abierto o un código por guardar en pantalla, se reintenta en el próximo ciclo.
+      if (document.querySelector("dialog[open], [data-hold-refresh]")) return;
       stale.current = false;
       router.refresh();
     };
