@@ -47,6 +47,8 @@ export type AgendaItem =
       statementDate: string;
       /** El corte aún no llega: el monto puede subir con nuevas compras. */
       estimated: boolean;
+      /** Compras y cuotas que forman este pago. */
+      lines: CardBillLine[];
     })
   | (Base & {
       kind: "loan";
@@ -55,6 +57,14 @@ export type AgendaItem =
       accountId: string | null;
       external: boolean;
     });
+
+export type CardBillLine = {
+  description: string;
+  occurredOn: string;
+  amount: number;
+  installment: number | null;
+  installments: number | null;
+};
 
 /** Marcas informativas del calendario (no son pagos): días de corte de las tarjetas. */
 export type CalendarMarker = { date: string; label: string };
@@ -167,6 +177,7 @@ export async function buildAgenda(
       dueOn: bill.dates.dueDate,
       statementDate: bill.dates.statementDate,
       estimated,
+      lines: card.lines,
       status: nothingDue
         ? "clear"
         : statusFor(bill.dates.dueDate, today, isPaid),

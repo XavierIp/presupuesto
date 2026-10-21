@@ -1,8 +1,10 @@
 import "server-only";
 import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import {
+  billDates,
   billedInstallments,
   cardBill,
+  chargeForStatement,
   statementDateIn,
   type CardCharge,
 } from "@/lib/card-billing";
@@ -98,15 +100,40 @@ export async function cardStatements(
 
     // La deuda que tenía la tarjeta al registrarla se cobra en el primer pago.
     const openingDebt = Math.max(0, -card.openingBalance);
-    const billable: CardCharge[] = [...own];
+    const billable: (CardCharge & { description?: string | null })[] = [...own];
     if (openingDebt > 0) {
       billable.push({
+        description: "Deuda que tenía la tarjeta al registrarla",
         occurredOn: dateIn(card.createdAt),
         amount: openingDebt,
         installments: null,
         installmentAmount: null,
       });
     }
+    // Qué compras y cuotas forman el estado de cuenta de este mes.
+    const statementMonth = cycle
+      ? billDates(cycle, dueMonth).statementMonth
+      : null;
+    const lines =
+      cycle && statementMonth
+        ? billable
+            .map((c) => {
+              const { amount, installment } = chargeForStatement(
+                cycle,
+                c,
+                statementMonth,
+              );
+              return {
+                description: c.description || "Compra",
+                occurredOn: c.occurredOn,
+                amount,
+                installment,
+                installments: c.installments,
+              };
+            })
+            .filter((l) => l.amount > 0)
+            .sort((a, b) => a.occurredOn.localeCompare(b.occurredOn))
+        : [];
 
     return {
       ...card,
@@ -121,6 +148,8 @@ export async function cardStatements(
           )
         : null,
       statementDate: cycle ? statementDateIn(cycle, dueMonth) : null,
+      /** Compras y cuotas que entran en el pago de este mes. */
+      lines,
       /** Compras en cuotas que aún tienen cuotas por cobrar. */
       pendingInstallments: installmentPurchases
         .map((c) => {

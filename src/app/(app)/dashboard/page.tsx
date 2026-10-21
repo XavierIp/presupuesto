@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   CalendarClock,
   ChevronLeft,
   ChevronRight,
@@ -16,7 +18,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { getDashboard, type DashboardData } from "@/lib/data/dashboard";
 import { cn } from "@/lib/cn";
 import { formatMoney } from "@/lib/money";
-import { formatMonth } from "@/lib/schedule";
+import { formatDate, formatMonth } from "@/lib/schedule";
 
 export const metadata: Metadata = { title: "Inicio" };
 
@@ -40,8 +42,8 @@ async function Dashboard({
   const firstName = data.user.name.split(" ")[0];
 
   return (
-    <div className="grid gap-10">
-      <section className="stagger grid gap-6">
+    <div className="grid gap-8">
+      <section className="stagger grid gap-4">
         <div
           style={{ "--i": 0 } as React.CSSProperties}
           className="flex flex-wrap items-end justify-between gap-4"
@@ -107,15 +109,74 @@ async function Dashboard({
             </Link>
           </div>
         )}
+      </section>
 
-        <div
-          style={{ "--i": 2 } as React.CSSProperties}
-          aria-label="Resumen del mes"
-          role="region"
-          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+      {/* Mes: centrado, con sus ingresos y gastos */}
+      <section aria-label="Resumen del mes" className="grid gap-4">
+        <nav
+          aria-label="Cambiar de mes"
+          className="flex items-center justify-center gap-1"
         >
+          <MonthLink
+            href={`/dashboard?mes=${data.prevMonth}`}
+            label="Mes anterior"
+          >
+            <ChevronLeft className="size-5" aria-hidden />
+          </MonthLink>
+          <p className="min-w-[10.5rem] text-center text-[17px] font-semibold first-letter:uppercase">
+            {monthName}
+          </p>
+          <MonthLink
+            href={`/dashboard?mes=${data.nextMonth}`}
+            label="Mes siguiente"
+          >
+            <ChevronRight className="size-5" aria-hidden />
+          </MonthLink>
+        </nav>
+        {!data.isCurrentMonth && (
+          <Link
+            href="/dashboard"
+            className="-mt-2 justify-self-center text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Volver a hoy
+          </Link>
+        )}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <Stat
-            label={`Por pagar en ${monthName.split(" ")[0]} · ${data.pendingCount}`}
+            icon={ArrowDownLeft}
+            label="Ingresos"
+            value={formatMoney(data.income, currency)}
+            tone="income"
+            note={
+              data.toCollect > 0
+                ? `+ ${formatMoney(data.toCollect, currency)} que te pagan`
+                : undefined
+            }
+          />
+          <Stat
+            icon={ArrowUpRight}
+            label="Gastos"
+            value={formatMoney(data.expense, currency)}
+            tone="expense"
+          />
+        </div>
+      </section>
+
+      <section aria-labelledby="agenda-title" className="grid gap-4">
+        <h2
+          id="agenda-title"
+          className="flex items-center gap-2 text-[22px] font-semibold tracking-[-0.01em]"
+        >
+          <CalendarClock
+            className="size-5 text-muted-foreground"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+          Mis pagos
+        </h2>
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          <Stat
+            label={`Por pagar · ${data.pendingCount}`}
             value={formatMoney(data.pending, currency)}
             note={
               data.overdueCount > 0
@@ -127,117 +188,64 @@ async function Dashboard({
             noteTone={data.overdueCount > 0 ? "expense" : undefined}
           />
           <Stat
-            label="Te quedaría tras pagar"
+            label="Te quedaría"
             value={formatMoney(data.afterPayments, currency)}
-            tone={data.afterPayments < 0 ? "expense" : "income"}
+            tone={data.afterPayments < 0 ? "expense" : undefined}
             note={
               data.afterPayments < 0
-                ? "No alcanza para los pagos del mes"
-                : undefined
+                ? "No alcanza para los pagos"
+                : "después de pagar todo"
             }
-            noteTone="expense"
-          />
-          <Stat
-            label={
-              data.toCollect > 0 ? "Te pagan este mes" : "Ingresos del mes"
-            }
-            value={formatMoney(
-              data.toCollect > 0 ? data.toCollect : data.income,
-              currency,
-              {
-                signed: true,
-              },
-            )}
-            tone={data.toCollect > 0 ? "income" : undefined}
-            note={
-              data.toCollect > 0
-                ? `Ingresos registrados: ${formatMoney(data.income, currency)}`
-                : undefined
-            }
-          />
-          <Stat
-            label="Gastos del mes"
-            value={formatMoney(-data.expense, currency, { signed: true })}
+            noteTone={data.afterPayments < 0 ? "expense" : undefined}
           />
         </div>
-      </section>
-
-      <section aria-labelledby="agenda-title" className="grid gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2
-            id="agenda-title"
-            className="flex items-center gap-2 text-[22px] font-semibold tracking-[-0.01em]"
-          >
-            <CalendarClock
-              className="size-5 text-muted-foreground"
-              strokeWidth={1.75}
-              aria-hidden
-            />
-            Mis pagos
-          </h2>
-          <nav aria-label="Cambiar de mes" className="flex items-center gap-1">
-            <MonthLink
-              href={`/dashboard?mes=${data.prevMonth}`}
-              label="Mes anterior"
+        {data.agenda.length === 0 ? (
+          <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+            No hay pagos este mes. Agrega cuotas o servicios en{" "}
+            <Link
+              href="/presupuestos"
+              className="font-medium text-primary underline-offset-4 hover:underline"
             >
-              <ChevronLeft className="size-5" aria-hidden />
-            </MonthLink>
-            <p className="min-w-[10.5rem] text-center font-medium first-letter:uppercase">
-              {monthName}
-            </p>
-            <MonthLink
-              href={`/dashboard?mes=${data.nextMonth}`}
-              label="Mes siguiente"
-            >
-              <ChevronRight className="size-5" aria-hidden />
-            </MonthLink>
-            {!data.isCurrentMonth && (
-              <Link
-                href="/dashboard"
-                className="ml-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
-              >
-                Hoy
-              </Link>
-            )}
-          </nav>
-        </div>
-
-        <div className="grid gap-6">
-          {data.agenda.length === 0 ? (
-            <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-              No hay pagos este mes. Agrega cuotas o servicios en{" "}
-              <Link
-                href="/presupuestos"
-                className="font-medium text-primary underline-offset-4 hover:underline"
-              >
-                Presupuesto
-              </Link>
-              ; los pagos de tus tarjetas aparecen solos cuando registras
-              compras con ellas (y tienen día de corte y de pago).
-            </p>
-          ) : (
-            <AgendaList
-              items={data.agenda}
-              today={data.today}
-              monthKey={data.monthKey}
-              sources={data.sources}
-              defaultSourceId={data.defaultSourceId}
-              cardDebt={data.cardDebt}
-            />
-          )}
-          <PaymentsCalendar
-            month={data.month}
-            today={data.today}
+              Presupuesto
+            </Link>
+            ; los pagos de tus tarjetas aparecen solos cuando registras compras
+            con ellas (y tienen día de corte y de pago).
+          </p>
+        ) : (
+          <AgendaList
             items={data.agenda}
-            markers={data.markers}
+            today={data.today}
+            monthKey={data.monthKey}
+            sources={data.sources}
+            defaultSourceId={data.defaultSourceId}
+            cardDebt={data.cardDebt}
           />
-        </div>
+        )}
       </section>
 
-      <div className="grid gap-8 lg:grid-cols-[1.2fr_1fr]">
-        <BudgetsSection data={data} />
-        <RecentSection data={data} />
-      </div>
+      <section aria-labelledby="calendar-title" className="grid gap-4">
+        <div className="grid gap-1">
+          <h2
+            id="calendar-title"
+            className="text-[22px] font-semibold tracking-[-0.01em]"
+          >
+            Calendario
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Toca un día para ver qué pagas, de qué es cada pago y qué
+            registraste.
+          </p>
+        </div>
+        <PaymentsCalendar
+          month={data.month}
+          today={data.today}
+          items={data.agenda}
+          markers={data.markers}
+          movements={data.monthMovements}
+        />
+      </section>
+
+      <RecentSection data={data} />
     </div>
   );
 }
@@ -313,58 +321,6 @@ function MainAccountCard({
   );
 }
 
-function BudgetsSection({ data }: { data: DashboardData }) {
-  const { currency } = data.user;
-  return (
-    <section className="grid content-start gap-4">
-      <SectionTitle title="Presupuestos del mes" href="/presupuestos" />
-      {data.budgets.length === 0 ? (
-        <EmptyCard text="Aún no tienes presupuestos por categoría para este mes." />
-      ) : (
-        <ul className="grid gap-3 rounded-xl border bg-card p-5">
-          {data.budgets.map((b) => {
-            const ratio = b.amount > 0 ? b.spent / b.amount : 0;
-            const tone =
-              ratio >= 1
-                ? "bg-expense"
-                : ratio >= 0.8
-                  ? "bg-warning"
-                  : "bg-primary";
-            return (
-              <li key={b.id} className="grid gap-2">
-                <div className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="font-medium">{b.category}</span>
-                  <span className="text-muted-foreground tabular-nums">
-                    {formatMoney(b.spent, currency)} /{" "}
-                    {formatMoney(b.amount, currency)}
-                  </span>
-                </div>
-                <div
-                  className="h-2 overflow-hidden rounded-full bg-muted"
-                  role="progressbar"
-                  aria-label={`Gastado en ${b.category}`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(Math.min(ratio, 1) * 100)}
-                >
-                  <div
-                    className={cn("progress-fill h-full rounded-full", tone)}
-                    style={
-                      {
-                        "--progress": Math.min(ratio, 1),
-                      } as React.CSSProperties
-                    }
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
-
 function RecentSection({ data }: { data: DashboardData }) {
   return (
     <section className="grid content-start gap-4">
@@ -383,7 +339,8 @@ function RecentSection({ data }: { data: DashboardData }) {
                   {t.description || t.category?.name || "Movimiento"}
                 </p>
                 <p className="truncate text-[13px] text-muted-foreground">
-                  {t.account.name} · {t.occurredOn}
+                  {t.account.name} ·{" "}
+                  {formatDate(t.occurredOn, { withYear: false })}
                 </p>
               </div>
               <p
@@ -411,12 +368,14 @@ function RecentSection({ data }: { data: DashboardData }) {
 }
 
 function Stat({
+  icon: Icon,
   label,
   value,
   note,
   tone,
   noteTone,
 }: {
+  icon?: typeof ArrowUpRight;
   label: string;
   value: string;
   note?: string;
@@ -424,15 +383,24 @@ function Stat({
   noteTone?: "expense";
 }) {
   return (
-    <article className="grid content-start gap-2 rounded-xl border bg-card p-5">
-      <p className="text-[13px] font-medium text-muted-foreground first-letter:uppercase">
+    <article className="grid min-w-0 content-start gap-2 rounded-xl border bg-card p-4 sm:p-5">
+      <p className="flex items-center gap-1.5 truncate text-[13px] font-medium text-muted-foreground first-letter:uppercase">
+        {Icon && (
+          <Icon
+            className={cn(
+              "size-4 shrink-0",
+              tone === "income" && "text-income",
+              tone === "expense" && "text-expense",
+            )}
+            aria-hidden
+          />
+        )}
         {label}
       </p>
       <p
         className={cn(
-          "text-[26px] leading-none font-bold tracking-[-0.02em] tabular-nums",
-          tone === "income" && "text-income",
-          tone === "expense" && "text-expense",
+          "truncate text-[21px] leading-none font-bold tracking-[-0.02em] tabular-nums sm:text-[26px]",
+          tone === "expense" && !Icon && "text-expense",
         )}
       >
         {value}
@@ -440,7 +408,7 @@ function Stat({
       {note && (
         <p
           className={cn(
-            "text-[13px]",
+            "text-[12px] sm:text-[13px]",
             noteTone === "expense" ? "text-expense" : "text-muted-foreground",
           )}
         >
@@ -504,8 +472,8 @@ function DashboardSkeleton() {
         <span className="h-3 w-40 rounded bg-muted" />
         <span className="h-12 w-64 rounded-lg bg-muted" />
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }, (_, i) => (
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+        {Array.from({ length: 2 }, (_, i) => (
           <span key={i} className="h-[106px] rounded-xl bg-muted" />
         ))}
       </div>

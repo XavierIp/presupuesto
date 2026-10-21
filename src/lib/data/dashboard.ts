@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { budgets, categories, transactions } from "@/lib/db/schema";
+import { financialAccounts, transactions } from "@/lib/db/schema";
 import {
   addMonths,
   firstDayOf,
@@ -39,7 +39,7 @@ export async function getDashboard(monthParam?: string) {
     accounts,
     agendaData,
     monthTotals,
-    budgetRows,
+    monthMovements,
     recent,
     primary,
     loanActions,
@@ -65,30 +65,31 @@ export async function getDashboard(monthParam?: string) {
       )
       .groupBy(transactions.kind),
 
+    // Movimientos del mes, para el detalle de cada día del calendario.
     db
       .select({
-        id: budgets.id,
-        category: categories.name,
-        amount: budgets.amount,
-        spent: sql<number>`coalesce(sum(${transactions.amount}), 0)`.mapWith(
-          Number,
-        ),
+        id: transactions.id,
+        kind: transactions.kind,
+        amount: transactions.amount,
+        installments: transactions.installments,
+        description: transactions.description,
+        occurredOn: transactions.occurredOn,
+        account: financialAccounts.name,
+        currency: financialAccounts.currency,
       })
-      .from(budgets)
-      .innerJoin(categories, eq(categories.id, budgets.categoryId))
-      .leftJoin(
-        transactions,
+      .from(transactions)
+      .innerJoin(
+        financialAccounts,
+        eq(financialAccounts.id, transactions.accountId),
+      )
+      .where(
         and(
-          eq(transactions.categoryId, budgets.categoryId),
           eq(transactions.userId, user.id),
-          eq(transactions.kind, "expense"),
           gte(transactions.occurredOn, start),
           lt(transactions.occurredOn, end),
         ),
       )
-      .where(and(eq(budgets.userId, user.id), eq(budgets.month, start)))
-      .groupBy(budgets.id, categories.name)
-      .orderBy(categories.name),
+      .orderBy(desc(transactions.createdAt)),
 
     db.query.transactions.findMany({
       where: eq(transactions.userId, user.id),
@@ -141,7 +142,7 @@ export async function getDashboard(monthParam?: string) {
     afterPayments: available - pending,
     income: monthTotals.find((t) => t.kind === "income")?.total ?? 0,
     expense: monthTotals.find((t) => t.kind === "expense")?.total ?? 0,
-    budgets: budgetRows,
+    monthMovements,
     recent,
     sources: toPaymentSources(accounts),
     /** Deuda total de cada tarjeta de crédito (para el formulario de pago). */
