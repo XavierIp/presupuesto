@@ -226,8 +226,13 @@ export async function getLoanDetail(loanId: string) {
       accountType: financialAccounts.type,
     })
     .from(transactions)
-    .innerJoin(financialAccounts, eq(financialAccounts.id, transactions.accountId))
-    .where(and(eq(transactions.loanId, loanId), eq(transactions.userId, user.id)));
+    .innerJoin(
+      financialAccounts,
+      eq(financialAccounts.id, transactions.accountId),
+    )
+    .where(
+      and(eq(transactions.loanId, loanId), eq(transactions.userId, user.id)),
+    );
   return {
     user,
     today,
@@ -306,6 +311,69 @@ export async function loanAgenda(
         loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId,
       external: loan.isExternal,
     });
+  }
+  return items;
+}
+
+/**
+ * Pagos de préstamos que vencieron antes de `before` y siguen sin pagarse (hasta hoy).
+ * Se arrastran a los meses siguientes hasta que se paguen. Las cuentas libres con día de pago
+ * no se arrastran: cada mes ya vence todo su saldo.
+ */
+export async function loanOverdue(
+  userId: string,
+  before: string,
+  today: string,
+): Promise<LoanAgendaItem[]> {
+  const rows = await loadLoans(
+    and(
+      or(eq(loans.lenderId, userId), eq(loans.borrowerId, userId)),
+      eq(loans.status, "active"),
+    ),
+  );
+  const items: LoanAgendaItem[] = [];
+  for (const row of rows) {
+    const loan = summarize(row, userId, today);
+    const late = (dueOn: string) => dueOn < before && dueOn < today;
+    const base = {
+      loanId: loan.id,
+      role: loan.role,
+      name:
+        loan.role === "lender"
+          ? `Te paga ${loan.counterpart}`
+          : `Préstamo de ${loan.counterpart}`,
+      currency: loan.currency,
+      accountId:
+        loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId,
+      external: loan.isExternal,
+    };
+    for (const cuota of loan.schedule) {
+      if (cuota.paid || !late(cuota.dueOn)) continue;
+      items.push({
+        ...base,
+        detail:
+          loan.installments === 1
+            ? "Pago único"
+            : `Cuota ${cuota.number} de ${loan.installments}`,
+        dueOn: cuota.dueOn,
+        amount: cuota.amount,
+        remaining: cuota.remaining,
+      });
+    }
+    if (
+      loan.type === "open" &&
+      loan.dueOn &&
+      late(loan.dueOn) &&
+      loan.balance > 0
+    ) {
+      items.push({
+        ...base,
+        detail: "Fecha límite para pagar todo",
+        dueOn: loan.dueOn,
+        amount: loan.balance,
+        remaining: loan.balance,
+      });
+    }
   }
   return items;
 }

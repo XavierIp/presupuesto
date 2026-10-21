@@ -17,7 +17,7 @@ import {
   primaryAccount,
   toPaymentSources,
 } from "./accounts";
-import { buildAgenda } from "./agenda";
+import { buildAgenda, overdueBefore } from "./agenda";
 import { pendingLoanActions } from "./loans";
 
 /**
@@ -43,6 +43,7 @@ export async function getDashboard(monthParam?: string) {
     recent,
     primary,
     loanActions,
+    carried,
   ] = await Promise.all([
     accountBalances(user.id),
     buildAgenda(user.id, ym, today),
@@ -103,6 +104,11 @@ export async function getDashboard(monthParam?: string) {
 
     primaryAccount(user.id, user.currency),
     pendingLoanActions(user.id),
+    // Lo vencido de meses anteriores se arrastra desde el mes actual en adelante
+    // (en meses pasados no tiene sentido).
+    start >= firstDayOf({ year: current.year, month: current.month })
+      ? overdueBefore(user.id, ym, today)
+      : Promise.resolve([]),
   ]);
   const agenda = agendaData.items;
 
@@ -114,7 +120,13 @@ export async function getDashboard(monthParam?: string) {
   const toCollect = mine
     .filter((i) => i.direction === "in" && i.status !== "paid")
     .reduce((sum, i) => sum + i.amount, 0);
-  const pending = pendingItems.reduce((sum, i) => sum + i.amount, 0);
+  // Vencidos de meses anteriores: suman a "Por pagar" pero no van al calendario.
+  const carriedOut = carried.filter(
+    (i) => i.direction === "out" && i.currency === user.currency,
+  );
+  const carriedTotal = carriedOut.reduce((sum, i) => sum + i.amount, 0);
+  const pending =
+    pendingItems.reduce((sum, i) => sum + i.amount, 0) + carriedTotal;
   const available = availableBalance(accounts, user.currency);
 
   return {
@@ -129,8 +141,13 @@ export async function getDashboard(monthParam?: string) {
     available,
     agenda,
     pending,
-    pendingCount: pendingItems.length,
-    overdueCount: pendingItems.filter((i) => i.status === "overdue").length,
+    pendingCount: pendingItems.length + carriedOut.length,
+    overdueCount:
+      pendingItems.filter((i) => i.status === "overdue").length +
+      carriedOut.length,
+    /** Pagos vencidos de meses anteriores sin pagar (alerta arriba). */
+    carried,
+    carriedTotal,
     paid: outgoing
       .filter((i) => i.status === "paid")
       .reduce((sum, i) => sum + i.amount, 0),

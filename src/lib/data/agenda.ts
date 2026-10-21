@@ -3,12 +3,15 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { recurringPayments } from "@/lib/db/schema";
 import {
+  addMonths,
+  firstDayOf,
   occurrencesInMonth,
+  parseDate,
   totalInstallments,
   type YearMonth,
 } from "@/lib/schedule";
 import { cardStatements } from "./cards";
-import { loanAgenda } from "./loans";
+import { loanAgenda, loanOverdue } from "./loans";
 
 // Uso interno de la capa de datos: quien llama ya resolvió al usuario con getCurrentUser().
 
@@ -210,4 +213,88 @@ export async function buildAgenda(
     (a, b) => a.dueOn.localeCompare(b.dueOn) || a.name.localeCompare(b.name),
   );
   return { items, markers };
+}
+
+/** Hasta cuántos meses atrás se buscan pagos vencidos sin pagar. */
+const OVERDUE_LOOKBACK = 24;
+
+/**
+ * Pagos que vencieron antes del mes `ym` y siguen sin pagarse: cuotas del presupuesto y
+ * de préstamos. Se arrastran a "Por pagar" hasta que se paguen. Las tarjetas no van aquí:
+ * su estado de cuenta ya arrastra lo no pagado al siguiente pago.
+ */
+export async function overdueBefore(
+  userId: string,
+  ym: YearMonth,
+  today: string,
+): Promise<AgendaItem[]> {
+  const before = firstDayOf(ym);
+  const [plans, loans] = await Promise.all([
+    db.query.recurringPayments.findMany({
+      where: eq(recurringPayments.userId, userId),
+      with: {
+        category: { columns: { name: true } },
+        records: { columns: { installment: true } },
+      },
+    }),
+    loanOverdue(userId, before, today),
+  ]);
+
+  const items: AgendaItem[] = [];
+  for (const plan of plans) {
+    const start = parseDate(plan.startDate);
+    const total = totalInstallments(plan);
+    for (let k = OVERDUE_LOOKBACK; k >= 1; k--) {
+      const month = addMonths(ym, -k);
+      if (month.year * 12 + month.month < start.year * 12 + start.month)
+        continue;
+      for (const occurrence of occurrencesInMonth(plan, month)) {
+        if (occurrence.dueOn >= today) continue;
+        if (plan.records.some((r) => r.installment === occurrence.installment))
+          continue;
+        items.push({
+          kind: "plan",
+          key: `plan:${plan.id}:${occurrence.installment}`,
+          planId: plan.id,
+          installment: occurrence.installment,
+          recordId: null,
+          accountId: plan.accountId,
+          name: plan.name,
+          detail: [
+            installmentLabel(occurrence.installment, total, plan.frequency),
+            plan.category?.name,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          amount: plan.amount,
+          currency: plan.currency,
+          dueOn: occurrence.dueOn,
+          status: "overdue",
+          paidOn: null,
+          direction: "out",
+        });
+      }
+    }
+  }
+
+  for (const loan of loans) {
+    items.push({
+      kind: "loan",
+      key: `loan:${loan.loanId}:${loan.dueOn}`,
+      loanId: loan.loanId,
+      role: loan.role,
+      accountId: loan.accountId,
+      external: loan.external,
+      name: loan.name,
+      detail: loan.detail,
+      amount: loan.remaining,
+      currency: loan.currency,
+      dueOn: loan.dueOn,
+      status: "overdue",
+      paidOn: null,
+      direction: loan.role === "lender" ? "in" : "out",
+    });
+  }
+
+  return items.sort((a, b) => a.dueOn.localeCompare(b.dueOn));
 }

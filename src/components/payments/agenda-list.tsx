@@ -171,7 +171,7 @@ export function AgendaList({
   );
 }
 
-function PaymentAction({
+export function PaymentAction({
   item,
   monthKey,
   sources,

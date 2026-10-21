@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import {
+  AlertTriangle,
   ArrowDownLeft,
   ArrowUpRight,
   CalendarClock,
+  CreditCard,
   ChevronLeft,
   ChevronRight,
   HandCoins,
@@ -12,7 +14,7 @@ import {
   PiggyBank,
   Wallet,
 } from "lucide-react";
-import { AgendaList } from "@/components/payments/agenda-list";
+import { AgendaList, PaymentAction } from "@/components/payments/agenda-list";
 import { PaymentsCalendar } from "@/components/payments/payments-calendar";
 import { buttonClasses } from "@/components/ui/button";
 import { getDashboard, type DashboardData } from "@/lib/data/dashboard";
@@ -44,6 +46,7 @@ async function Dashboard({
   return (
     <div className="grid gap-8">
       <section className="stagger grid gap-4">
+        <OverdueAlert data={data} />
         <div
           style={{ "--i": 0 } as React.CSSProperties}
           className="flex flex-wrap items-end justify-between gap-4"
@@ -247,6 +250,122 @@ async function Dashboard({
 
       <RecentSection data={data} />
     </div>
+  );
+}
+
+/**
+ * Pagos vencidos de meses anteriores que siguen sin pagarse. Suman a "Por pagar" hasta que
+ * se paguen, pero no aparecen en el calendario del mes que estás viendo.
+ */
+function OverdueAlert({ data }: { data: DashboardData }) {
+  const { currency } = data.user;
+  // Tarjetas: lo no pagado ya va dentro de su siguiente pago; solo se avisa.
+  // En meses pasados no se avisa.
+  const cards = data.isCurrentMonth
+    ? data.agenda.filter(
+        (i) => i.kind === "card" && i.previous > 0 && i.status !== "paid",
+      )
+    : [];
+  if (data.carried.length === 0 && cards.length === 0) return null;
+  const owe = data.carried.filter((i) => i.direction === "out");
+  return (
+    <section
+      aria-labelledby="vencidos"
+      style={{ "--i": 1 } as React.CSSProperties}
+      className="grid gap-3 rounded-xl border border-expense/40 bg-expense/5 p-4 sm:p-5"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <h2
+          id="vencidos"
+          className="flex items-center gap-2 font-semibold text-expense"
+        >
+          <AlertTriangle className="size-5 shrink-0" aria-hidden />
+          {owe.length > 0
+            ? `Tienes ${owe.length} pago${owe.length === 1 ? "" : "s"} vencido${owe.length === 1 ? "" : "s"}`
+            : data.carried.length > 0
+              ? `Te deben ${data.carried.length} pago${data.carried.length === 1 ? "" : "s"} vencido${data.carried.length === 1 ? "" : "s"}`
+              : "Deuda vencida en tu tarjeta"}
+        </h2>
+        {data.carriedTotal > 0 && (
+          <p className="shrink-0 font-semibold text-expense tabular-nums">
+            {formatMoney(data.carriedTotal, currency)}
+          </p>
+        )}
+      </div>
+      {data.carriedTotal > 0 && (
+        <p className="-mt-1 text-[13px] text-muted-foreground">
+          Siguen sumando a &quot;Por pagar&quot; cada mes hasta que los pagues.
+        </p>
+      )}
+      <ul className="divide-y rounded-lg border bg-card">
+        {data.carried.map((item) => {
+          const incoming = item.direction === "in";
+          return (
+            <li
+              key={item.key}
+              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{item.name}</p>
+                <p className="truncate text-[13px] text-muted-foreground">
+                  {item.detail ? `${item.detail} · ` : ""}venció el{" "}
+                  {formatDate(item.dueOn)}
+                </p>
+              </div>
+              <div className="ml-auto flex items-center gap-3">
+                <p
+                  className={cn(
+                    "font-semibold tabular-nums",
+                    incoming ? "text-income" : "text-expense",
+                  )}
+                >
+                  {formatMoney(
+                    incoming ? item.amount : -item.amount,
+                    item.currency,
+                    {
+                      signed: true,
+                    },
+                  )}
+                </p>
+                <PaymentAction
+                  item={item}
+                  monthKey={item.dueOn.slice(0, 7)}
+                  sources={data.sources}
+                  defaultSourceId={data.defaultSourceId}
+                  cardDebt={data.cardDebt}
+                />
+              </div>
+            </li>
+          );
+        })}
+        {cards.map(
+          (item) =>
+            item.kind === "card" && (
+              <li
+                key={item.key}
+                className="flex items-center justify-between gap-3 px-3 py-2.5"
+              >
+                <div className="flex min-w-0 items-start gap-2">
+                  <CreditCard
+                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{item.name}</p>
+                    <p className="text-[13px] text-muted-foreground">
+                      Quedó sin pagar del mes anterior. Ya está sumado a su pago
+                      del {formatDate(item.dueOn, { withYear: false })}.
+                    </p>
+                  </div>
+                </div>
+                <p className="shrink-0 font-semibold text-expense tabular-nums">
+                  {formatMoney(item.previous, item.currency)}
+                </p>
+              </li>
+            ),
+        )}
+      </ul>
+    </section>
   );
 }
 
