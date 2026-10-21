@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1792551062667,
+      "tag": "0000_shocking_kid_colt",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792552028898,
+      "tag": "0001_skinny_power_pack",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792554216300,
+      "tag": "0002_hesitant_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792555163960,
+      "tag": "0003_natural_excalibur",
+      "breakpoints": true
+    }
+  ]
+}

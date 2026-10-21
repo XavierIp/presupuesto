@@ -1,0 +1,398 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Suspense } from "react";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Bell,
+  ChevronRight,
+  HandCoins,
+  Plus,
+} from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { Modal } from "@/components/ui/modal";
+import { getLoansPage, type LoanSummary } from "@/lib/data/loans";
+import { cn } from "@/lib/cn";
+import { formatMoney } from "@/lib/money";
+import { formatDate } from "@/lib/schedule";
+import {
+  LoanForm,
+  RespondLoanForm,
+  RespondPaymentForm,
+  RespondRequestForm,
+} from "./forms";
+import { describeTerms, LOAN_STATUS } from "./labels";
+
+export const metadata: Metadata = { title: "Préstamos" };
+
+export default function PrestamosPage() {
+  return (
+    <Suspense fallback={<LoansSkeleton />}>
+      <LoansView />
+    </Suspense>
+  );
+}
+
+async function LoansView() {
+  const data = await getLoansPage();
+  const { currency } = data.user;
+
+  return (
+    <>
+      <PageHeader
+        title="Préstamos"
+        description="Lo que prestas y lo que te prestan, con sus cuotas y abonos."
+        actions={
+          <Modal
+            title="Prestar dinero"
+            description="A otro usuario por su DNI, o a alguien que no usa la app."
+            trigger={{
+              label: (
+                <>
+                  <Plus className="size-4" aria-hidden />
+                  Prestar
+                </>
+              ),
+            }}
+          >
+            <LoanForm
+              currency={currency}
+              sources={data.sources}
+              today={data.today}
+            />
+          </Modal>
+        }
+      />
+
+      <div className="grid gap-10">
+        {data.actions.length > 0 && <PendingActions data={data} />}
+
+        <section
+          aria-label="Resumen"
+          className="stagger grid gap-4 sm:grid-cols-2"
+        >
+          <Stat
+            index={0}
+            icon={ArrowUpRight}
+            label="Me deben"
+            value={formatMoney(data.owedToMe, currency)}
+            tone="income"
+          />
+          <Stat
+            index={1}
+            icon={ArrowDownLeft}
+            label="Debo"
+            value={formatMoney(data.iOwe, currency)}
+            tone={data.iOwe > 0 ? "expense" : undefined}
+          />
+        </section>
+
+        <LoanList
+          title="Presté"
+          empty="Aún no has prestado dinero."
+          loans={data.lent}
+        />
+        <LoanList
+          title="Me prestaron"
+          empty="Nadie te ha prestado dinero."
+          loans={data.borrowed}
+        />
+        {data.closed.length > 0 && (
+          <LoanList title="Historial" empty="" loans={data.closed} muted />
+        )}
+      </div>
+    </>
+  );
+}
+
+type Data = Awaited<ReturnType<typeof getLoansPage>>;
+
+function PendingActions({ data }: { data: Data }) {
+  return (
+    <section aria-labelledby="pendientes" className="grid gap-3">
+      <h2
+        id="pendientes"
+        className="flex items-center gap-2 text-[22px] font-semibold tracking-[-0.01em]"
+      >
+        <Bell className="size-5 text-warning" strokeWidth={1.75} aria-hidden />
+        Por responder
+      </h2>
+      <ul className="divide-y rounded-xl border border-warning/40 bg-card">
+        {data.actions.flatMap((loan) => [
+          ...(loan.myActions.acceptLoan
+            ? [
+                <ActionRow
+                  key={`loan-${loan.id}`}
+                  title={
+                    loan.type === "open"
+                      ? `${loan.counterpart} te abrió una cuenta libre`
+                      : `${loan.counterpart} te quiere prestar ${formatMoney(loan.principal, loan.currency)}`
+                  }
+                  detail={describeTerms(loan)}
+                  action={
+                    <Modal
+                      title={
+                        loan.type === "open"
+                          ? "Cuenta libre"
+                          : "Préstamo recibido"
+                      }
+                      description={describeTerms(loan)}
+                      trigger={{
+                        variant: "primary",
+                        className: "h-10 px-3",
+                        label: "Responder",
+                      }}
+                    >
+                      <RespondLoanForm
+                        loanId={loan.id}
+                        currency={loan.currency}
+                        sources={data.sources}
+                        amount={loan.principal}
+                        defaultAccountId={data.defaultCashId}
+                      />
+                    </Modal>
+                  }
+                />,
+              ]
+            : []),
+          ...loan.myActions.acceptEntries.map((entry) => (
+            <ActionRow
+              key={`entry-${entry.id}`}
+              title={`${loan.counterpart} te pide ${formatMoney(entry.amount, loan.currency)}`}
+              detail={entry.note ?? "Cuenta libre"}
+              action={
+                <Modal
+                  title={`Pedido de ${loan.counterpart}`}
+                  description={`${formatMoney(entry.amount, loan.currency)}${entry.note ? ` · ${entry.note}` : ""}`}
+                  trigger={{
+                    variant: "primary",
+                    className: "h-10 px-3",
+                    label: "Responder",
+                  }}
+                >
+                  <RespondRequestForm
+                    entryId={entry.id}
+                    currency={loan.currency}
+                    sources={data.sources}
+                    defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
+                  />
+                </Modal>
+              }
+            />
+          )),
+          ...loan.myActions.confirmPayments.map((payment) => (
+            <ActionRow
+              key={`payment-${payment.id}`}
+              title={`${loan.counterpart} dice que te pagó ${formatMoney(payment.amount, loan.currency)}`}
+              detail={`El ${formatDate(payment.paidOn)}${payment.note ? ` · ${payment.note}` : ""}`}
+              action={
+                <Modal
+                  title="Confirmar abono"
+                  description={`${formatMoney(payment.amount, loan.currency)} de ${loan.counterpart}`}
+                  trigger={{
+                    variant: "primary",
+                    className: "h-10 px-3",
+                    label: "Revisar",
+                  }}
+                >
+                  <RespondPaymentForm
+                    paymentId={payment.id}
+                    currency={loan.currency}
+                    sources={data.sources}
+                    defaultAccountId={loan.lenderAccountId ?? data.defaultCashId}
+                  />
+                </Modal>
+              }
+            />
+          )),
+        ])}
+      </ul>
+    </section>
+  );
+}
+
+function ActionRow({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail: string;
+  action: React.ReactNode;
+}) {
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <div className="min-w-0">
+        <p className="font-medium">{title}</p>
+        <p className="text-[13px] text-muted-foreground">{detail}</p>
+      </div>
+      {action}
+    </li>
+  );
+}
+
+function LoanList({
+  title,
+  empty,
+  loans,
+  muted,
+}: {
+  title: string;
+  empty: string;
+  loans: LoanSummary[];
+  muted?: boolean;
+}) {
+  return (
+    <section className="grid gap-4">
+      <h2 className="text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
+      {loans.length === 0 ? (
+        <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+          {empty}
+        </p>
+      ) : (
+        <ul className={cn("grid gap-3 sm:grid-cols-2", muted && "opacity-80")}>
+          {loans.map((loan) => (
+            <LoanCard key={loan.id} loan={loan} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function LoanCard({ loan }: { loan: LoanSummary }) {
+  const ratio = loan.owed > 0 ? Math.min(loan.paid / loan.owed, 1) : 0;
+  const status = LOAN_STATUS[loan.status];
+  return (
+    <li>
+      <Link
+        href={`/prestamos/${loan.id}`}
+        className="grid gap-3 rounded-xl border bg-card p-5 transition-colors duration-150 hover:border-primary/40"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 truncate font-semibold">
+              <HandCoins
+                className="size-4 shrink-0 text-muted-foreground"
+                aria-hidden
+              />
+              <span className="truncate">{loan.counterpart}</span>
+            </p>
+            <p className="text-[13px] text-muted-foreground">
+              {loan.type === "open" ? "Cuenta libre" : "Con condiciones"}
+              {loan.isExternal && " · externo"}
+            </p>
+          </div>
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[12px] font-medium whitespace-nowrap",
+              status.tone,
+            )}
+          >
+            {status.label}
+          </span>
+        </div>
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-[13px] text-muted-foreground">
+              {loan.role === "lender" ? "Te debe" : "Debes"}
+            </p>
+            <p className="text-[22px] font-semibold tracking-[-0.01em] tabular-nums">
+              {formatMoney(
+                loan.status === "pending" ? loan.principal : loan.balance,
+                loan.currency,
+              )}
+            </p>
+          </div>
+          <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+        </div>
+        {loan.owed > 0 && (
+          <div className="grid gap-1.5">
+            <div className="flex justify-between text-[13px] text-muted-foreground tabular-nums">
+              <span>
+                Pagado {formatMoney(loan.paid, loan.currency)} de{" "}
+                {formatMoney(loan.owed, loan.currency)}
+              </span>
+              {loan.nextDue && (
+                <span className={cn(loan.overdue && "text-expense")}>
+                  {loan.overdue ? "Vencido" : "Próximo"}{" "}
+                  {formatDate(loan.nextDue.dueOn, { withYear: false })}
+                </span>
+              )}
+            </div>
+            <div
+              className="h-1.5 overflow-hidden rounded-full bg-muted"
+              aria-hidden
+            >
+              <div
+                className="progress-fill h-full rounded-full bg-income"
+                style={{ "--progress": ratio } as React.CSSProperties}
+              />
+            </div>
+          </div>
+        )}
+        {loan.pendingRequested > 0 && (
+          <p className="text-[13px] font-medium text-warning">
+            Pedido pendiente:{" "}
+            {formatMoney(loan.pendingRequested, loan.currency)}
+          </p>
+        )}
+      </Link>
+    </li>
+  );
+}
+
+function Stat({
+  index,
+  icon: Icon,
+  label,
+  value,
+  tone,
+}: {
+  index: number;
+  icon: typeof ArrowUpRight;
+  label: string;
+  value: string;
+  tone?: "income" | "expense";
+}) {
+  return (
+    <article
+      style={{ "--i": index } as React.CSSProperties}
+      className="grid gap-2 rounded-xl border bg-card p-5"
+    >
+      <p className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+        <Icon className="size-4" aria-hidden />
+        {label}
+      </p>
+      <p
+        className={cn(
+          "text-[28px] leading-none font-bold tracking-[-0.02em] tabular-nums",
+          tone === "income" && "text-income",
+          tone === "expense" && "text-expense",
+        )}
+      >
+        {value}
+      </p>
+    </article>
+  );
+}
+
+function LoansSkeleton() {
+  return (
+    <div
+      className="grid animate-pulse gap-10"
+      aria-busy="true"
+      aria-label="Cargando préstamos"
+    >
+      <span className="h-9 w-56 rounded-lg bg-muted" />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <span className="h-[92px] rounded-xl bg-muted" />
+        <span className="h-[92px] rounded-xl bg-muted" />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <span className="h-44 rounded-xl bg-muted" />
+        <span className="h-44 rounded-xl bg-muted" />
+      </div>
+    </div>
+  );
+}

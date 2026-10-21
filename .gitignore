@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# example env
+!.env.example
+
+# skills y configuración local de agentes (no son parte de la app)
+/.agents/
+/.claude/
+skills-lock.json
+
+# scripts temporales
+.q.mjs
+.check.mjs
