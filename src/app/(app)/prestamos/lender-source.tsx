@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AccountSelect } from "@/components/account-select";
 import { Field } from "@/components/ui/field";
 import { Segmented } from "@/components/ui/segmented";
@@ -24,6 +24,7 @@ export function LenderSourceFields({
   amount,
   defaults,
   errors,
+  onCardTotalChange,
 }: {
   label: string;
   sources: PaymentSource[];
@@ -33,6 +34,8 @@ export function LenderSourceFields({
   amount?: number;
   defaults?: { installments: number | null; installmentAmount: number | null };
   errors: Record<string, string>;
+  /** Avisa cuánto suman las cuotas de la tarjeta (null si no es tarjeta en cuotas). */
+  onCardTotalChange?: (total: number | null) => void;
 }) {
   const inCurrency = sources.filter((s) => s.currency === currency);
   const [source, setSource] = useState<PaymentSource | null>(
@@ -52,6 +55,14 @@ export function LenderSourceFields({
   const suggested =
     amount && Number.isInteger(n) && n >= 2 ? Math.round(amount / n) : null;
   const eachCents = parseMoney(each) || suggested;
+  const cardTotal =
+    isCredit && payMode === "installments" && eachCents && n >= 2
+      ? eachCents * n
+      : null;
+
+  useEffect(() => {
+    onCardTotalChange?.(cardTotal);
+  }, [cardTotal, onCardTotalChange]);
 
   return (
     <>
@@ -76,7 +87,7 @@ export function LenderSourceFields({
             ¿Cómo lo pagas con la tarjeta?
           </legend>
           <Segmented
-            name="payMode"
+            name="cardPayMode"
             value={payMode}
             onChange={(v) => setPayMode(v as typeof payMode)}
             options={[
@@ -89,7 +100,7 @@ export function LenderSourceFields({
               <div className="grid grid-cols-2 gap-4">
                 <Field
                   label="Número de cuotas"
-                  name="installments"
+                  name="cardInstallments"
                   inputMode="numeric"
                   autoComplete="off"
                   placeholder="Ej.: 6"
@@ -99,18 +110,18 @@ export function LenderSourceFields({
                       e.target.value.replace(/\D/g, "").slice(0, 2),
                     )
                   }
-                  error={errors.installments}
+                  error={errors.cardInstallments}
                 />
                 <Field
                   label={`Monto por cuota (${currencySymbol(currency)})`}
-                  name="installmentAmount"
+                  name="cardInstallmentAmount"
                   inputMode="decimal"
                   autoComplete="off"
                   placeholder={suggested ? centsToInput(suggested) : "Opcional"}
                   value={each}
                   onChange={(e) => setEach(e.target.value)}
                   hint="Si tiene intereses, pon la cuota real."
-                  error={errors.installmentAmount}
+                  error={errors.cardInstallmentAmount}
                 />
               </div>
               {eachCents && n >= 2 && (

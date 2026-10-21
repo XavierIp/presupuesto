@@ -6,6 +6,7 @@ import {
   ArrowDownLeft,
   ArrowLeft,
   ArrowUpRight,
+  CalendarClock,
   Check,
   HandCoins,
   PencilLine,
@@ -22,6 +23,7 @@ import { dateIn, formatDate } from "@/lib/schedule";
 import { cancelEntry, cancelLoan, cancelPayment } from "../actions";
 import {
   CloseLoanForm,
+  DeadlineForm,
   EntryForm,
   PaymentForm,
   RespondLoanForm,
@@ -147,6 +149,9 @@ async function LoanView({
           >
             <RespondLoanForm
               loanId={loan.id}
+              paidWithCard={loan.entries.some(
+                (e) => e.status === "pending" && e.paidWithCard,
+              )}
               currency={loan.currency}
               sources={sources}
               amount={loan.principal}
@@ -217,6 +222,29 @@ async function LoanView({
               defaultAmount={loan.nextDue?.remaining ?? loan.balance}
               defaultAccountId={myAccount}
               external={loan.isExternal}
+            />
+          </Modal>
+        )}
+        {isLender && active && loan.type === "open" && (
+          <Modal
+            title="Fecha límite"
+            description="Hasta qué día debe pagarte todo lo que le prestaste."
+            trigger={{
+              variant: "secondary",
+              label: (
+                <>
+                  <CalendarClock className="size-4" aria-hidden />
+                  {loan.dueOn
+                    ? `Hasta el ${formatDate(loan.dueOn, { withYear: false })}`
+                    : "Fecha límite"}
+                </>
+              ),
+            }}
+          >
+            <DeadlineForm
+              loanId={loan.id}
+              dueOn={loan.dueOn}
+              today={data.today}
             />
           </Modal>
         )}

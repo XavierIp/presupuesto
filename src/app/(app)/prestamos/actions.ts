@@ -14,7 +14,12 @@ import {
 } from "@/lib/db/schema";
 import { ownActiveAccount } from "@/lib/data/accounts";
 import { DNI_SCHEMA } from "@/lib/dni";
-import { maskName, percentToBasisPoints, totalOwed } from "@/lib/loans";
+import {
+  entryDebt,
+  maskName,
+  percentToBasisPoints,
+  totalOwed,
+} from "@/lib/loans";
 import { todayIn } from "@/lib/schedule";
 import { getCurrentUser } from "@/lib/session";
 import { fieldErrors, isoDate, money } from "@/lib/validation";
@@ -128,7 +133,7 @@ async function settleIfPaid(tx: Tx, loanId: string) {
       and(eq(loanPayments.loanId, loanId), eq(loanPayments.status, "accepted")),
     );
   const owed = totalOwed(
-    entries.reduce((s, e) => s + e.amount, 0),
+    entries.reduce((s, e) => s + entryDebt(e), 0),
     loan.interestRate,
   );
   const paid = payments.reduce((s, p) => s + p.amount, 0);
@@ -150,6 +155,7 @@ const createSchema = z
     firstDueOn: z.string().optional(),
     payDay: z.string().optional(),
     creditLimit: z.string().optional(),
+    dueOn: z.string().optional(),
     accountId: z.string().optional(),
     note: z.string().trim().max(120).optional(),
   })
@@ -175,12 +181,19 @@ const createSchema = z
         issue("installments", "Entre 1 y 120 cuotas.");
       if (!isoDate.safeParse(d.firstDueOn ?? "").success)
         issue("firstDueOn", "Elige la fecha del primer pago.");
-      if (!d.accountId)
-        issue("accountId", "Elige de qué cuenta sale el dinero.");
+      if (!d.accountId) issue("accountId", "Elige con qué le prestas.");
     } else {
-      const day = Number(d.payDay);
-      if (!Number.isInteger(day) || day < 1 || day > 31)
-        issue("payDay", "Escribe un día entre 1 y 31.");
+      if (d.dueOn) {
+        if (!isoDate.safeParse(d.dueOn).success)
+          issue("dueOn", "Elige una fecha límite válida.");
+      } else {
+        const day = Number(d.payDay);
+        if (!Number.isInteger(day) || day < 1 || day > 31)
+          issue(
+            "payDay",
+            "Escribe un día entre 1 y 31, o pon una fecha límite.",
+          );
+      }
       if (d.creditLimit && !money("el límite").safeParse(d.creditLimit).success)
         issue("creditLimit", "Límite no válido.");
     }
@@ -221,9 +234,28 @@ export async function createLoan(
     borrowerId = found.id;
   }
 
-  const account = await cashAccount(me.id, d.accountId, me.currency);
-  if ("error" in account)
-    return { ok: false, fieldErrors: { accountId: account.error! } };
+  // Préstamo con condiciones: cuenta o tarjeta de crédito (compra). Cuenta libre: cuenta habitual.
+  let funding: {
+    id: string | null;
+    installments: number | null;
+    installmentAmount: number | null;
+    paidWithCard: boolean;
+  };
+  if (d.type === "fixed") {
+    const f = await lenderFunding(me.id, formData, me.currency);
+    if ("error" in f) return { ok: false, fieldErrors: f.error };
+    funding = f;
+  } else {
+    const cash = await cashAccount(me.id, d.accountId, me.currency);
+    if ("error" in cash)
+      return { ok: false, fieldErrors: { accountId: cash.error! } };
+    funding = {
+      id: cash.id,
+      installments: null,
+      installmentAmount: null,
+      paidWithCard: false,
+    };
+  }
 
   const principal = d.type === "fixed" ? money("el monto").parse(d.amount) : 0;
   const external = d.target === "external";
@@ -244,32 +276,37 @@ export async function createLoan(
         interestRate: d.interest ? percentToBasisPoints(d.interest) : 0,
         installments: d.type === "fixed" ? Number(d.installments) : null,
         firstDueOn: d.type === "fixed" ? d.firstDueOn : null,
-        payDay: d.type === "open" ? Number(d.payDay) : null,
+        payDay: d.type === "open" && d.payDay ? Number(d.payDay) : null,
+        dueOn: d.type === "open" && d.dueOn ? d.dueOn : null,
         creditLimit:
           d.type === "open" && d.creditLimit
             ? money("el límite").parse(d.creditLimit)
             : null,
-        lenderAccountId: account.id,
+        // Cuenta donde recibirá los abonos: nunca una tarjeta de crédito.
+        lenderAccountId: funding.paidWithCard ? null : funding.id,
         note: d.note || null,
       })
       .returning({ id: loans.id });
 
     if (d.type === "fixed") {
       const lenderTx = external
-        ? await moveMoney(tx, {
-            userId: me.id,
-            accountId: account.id,
-            kind: "loan_out",
+        ? await lenderOut(tx, {
+            loan: { id: loan.id, lenderId: me.id },
+            accountId: funding.id,
             amount: principal,
-            description: `Préstamo a ${d.borrowerName}`,
-            loanId: loan.id,
+            installments: funding.installments,
+            installmentAmount: funding.installmentAmount,
+            borrowerName: d.borrowerName ?? "otra persona",
           })
         : null;
       await tx.insert(loanEntries).values({
         loanId: loan.id,
         amount: principal,
         requestedBy: me.id,
-        accountId: account.id,
+        accountId: funding.id,
+        installments: funding.installments,
+        installmentAmount: funding.installmentAmount,
+        paidWithCard: funding.paidWithCard,
         status: external ? "accepted" : "pending",
         disbursedOn: external ? todayIn() : null,
         lenderTransactionId: lenderTx,
@@ -327,9 +364,6 @@ export async function respondLoan(
   );
   if ("error" in account)
     return { ok: false, fieldErrors: { accountId: account.error! } };
-  const lenderAccount = loan.lenderAccountId
-    ? await ownActiveAccount(loan.lenderId, loan.lenderAccountId)
-    : null;
   const [lender] = await db
     .select({ name: users.name })
     .from(users)
@@ -356,22 +390,25 @@ export async function respondLoan(
           ),
         );
       if (entry) {
-        const lenderTx = await moveMoney(tx, {
-          userId: loan.lenderId,
-          accountId: lenderAccount?.id ?? null,
-          kind: "loan_out",
+        const lenderTx = await lenderOut(tx, {
+          loan,
+          accountId: entry.accountId ?? loan.lenderAccountId,
           amount: entry.amount,
-          description: `Préstamo a ${me.name}`,
-          loanId: loan.id,
+          installments: entry.installments,
+          installmentAmount: entry.installmentAmount,
+          borrowerName: me.name,
         });
-        const borrowerTx = await moveMoney(tx, {
-          userId: me.id,
-          accountId: account.id,
-          kind: "loan_in",
-          amount: entry.amount,
-          description: `Préstamo de ${lender?.name ?? "otra persona"}`,
-          loanId: loan.id,
-        });
+        // Si fue una compra con su tarjeta, al deudor no le entra dinero.
+        const borrowerTx = entry.paidWithCard
+          ? null
+          : await moveMoney(tx, {
+              userId: me.id,
+              accountId: account.id,
+              kind: "loan_in",
+              amount: entry.amount,
+              description: `Préstamo de ${lender?.name ?? "otra persona"}`,
+              loanId: loan.id,
+            });
         await tx
           .update(loanEntries)
           .set({
@@ -436,7 +473,7 @@ async function lenderFunding(
     };
   }
   const paidWithCard = account.type === "credit";
-  if (!paidWithCard || formData.get("payMode") !== "installments") {
+  if (!paidWithCard || formData.get("cardPayMode") !== "installments") {
     return {
       id: account.id as string | null,
       installments: null,
@@ -444,16 +481,18 @@ async function lenderFunding(
       paidWithCard,
     };
   }
-  const n = Number(formData.get("installments"));
+  const n = Number(formData.get("cardInstallments"));
   if (!Number.isInteger(n) || n < 2 || n > 60) {
-    return { error: { installments: "Escribe entre 2 y 60 cuotas." } };
+    return { error: { cardInstallments: "Escribe entre 2 y 60 cuotas." } };
   }
-  const rawEach = String(formData.get("installmentAmount") ?? "").trim();
+  const rawEach = String(formData.get("cardInstallmentAmount") ?? "").trim();
   let each: number | null = null;
   if (rawEach) {
     const parsed = money("el monto por cuota").safeParse(rawEach);
     if (!parsed.success)
-      return { error: { installmentAmount: parsed.error.issues[0].message } };
+      return {
+        error: { cardInstallmentAmount: parsed.error.issues[0].message },
+      };
     each = parsed.data;
   }
   return {
@@ -478,7 +517,7 @@ async function lenderOut(
     installmentAmount,
     borrowerName,
   }: {
-    loan: typeof loans.$inferSelect;
+    loan: { id: string; lenderId: string };
     accountId: string | null;
     amount: number;
     installments: number | null;
@@ -1026,7 +1065,7 @@ export async function closeLoan(
   ]);
   const balance =
     totalOwed(
-      entries.reduce((s, e) => s + e.amount, 0),
+      entries.reduce((s, e) => s + entryDebt(e), 0),
       loan.interestRate,
     ) - payments.reduce((s, p) => s + p.amount, 0);
   const names = await partyNames(loan);
@@ -1084,6 +1123,36 @@ export async function closeLoan(
       .where(eq(loans.id, loan.id));
   });
 
+  refresh();
+  return { ok: true };
+}
+
+/** El prestamista pone, cambia o quita la fecha límite para pagar todo en una cuenta libre. */
+export async function setLoanDeadline(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const me = await getCurrentUser();
+  const loan = await loanFor(String(formData.get("loanId")), me.id, "lender");
+  if (!loan || loan.type !== "open" || loan.status !== "active") {
+    return { ok: false, error: "Esta cuenta libre no está activa." };
+  }
+  const raw = String(formData.get("dueOn") ?? "").trim();
+  if (raw && !isoDate.safeParse(raw).success) {
+    return { ok: false, fieldErrors: { dueOn: "Elige una fecha válida." } };
+  }
+  if (!raw && !loan.payDay) {
+    return {
+      ok: false,
+      fieldErrors: {
+        dueOn: "Sin día de pago mensual, la fecha límite es obligatoria.",
+      },
+    };
+  }
+  await db
+    .update(loans)
+    .set({ dueOn: raw || null })
+    .where(eq(loans.id, loan.id));
   refresh();
   return { ok: true };
 }

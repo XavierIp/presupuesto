@@ -17,7 +17,27 @@ export type LoanTerms = {
   payDay: number | null;
   /** Cuenta libre: fecha de la primera entrega. No hay vencimientos en o antes de esa fecha. */
   startsOn?: string | null;
+  /** Cuenta libre: fecha límite para pagar todo. Si existe, reemplaza al día de pago mensual. */
+  dueOn?: string | null;
 };
+
+/**
+ * Lo que una entrega suma a la deuda. Si el prestamista la compró con su tarjeta en cuotas,
+ * la persona devuelve exactamente esas cuotas (incluidos los intereses de la tarjeta).
+ */
+export function entryDebt(entry: {
+  amount: number;
+  paidWithCard: boolean;
+  installments: number | null;
+  installmentAmount: number | null;
+}) {
+  if (!entry.paidWithCard || !entry.installments || entry.installments < 2)
+    return entry.amount;
+  return (
+    entry.installments *
+    (entry.installmentAmount ?? Math.round(entry.amount / entry.installments))
+  );
+}
 
 /** Total a devolver: lo prestado (aceptado) más el interés. */
 export function totalOwed(lent: number, interestRate: number) {
@@ -88,10 +108,20 @@ export function loanDueInMonth(
           : `Cuota ${cuota.number} de ${terms.installments}`,
     };
   }
-  // Cuenta libre: cada mes, en el día de pago, vence todo el saldo pendiente.
-  if (!terms.payDay) return null;
   const balance = Math.max(owed - paid, 0);
   if (owed <= 0) return null;
+  // Cuenta libre con fecha límite: todo el saldo vence ese día (y solo ese mes).
+  if (terms.dueOn) {
+    if (!terms.dueOn.startsWith(formatYearMonth(ym))) return null;
+    return {
+      dueOn: terms.dueOn,
+      amount: balance,
+      remaining: balance,
+      label: "Fecha límite para pagar todo",
+    };
+  }
+  // Cuenta libre: cada mes, en el día de pago, vence todo el saldo pendiente.
+  if (!terms.payDay) return null;
   const day = Math.min(terms.payDay, daysInMonth(ym));
   const dueOn = `${formatYearMonth(ym)}-${String(day).padStart(2, "0")}`;
   // El primer pago es el día de pago siguiente a la primera entrega (antes no había deuda).

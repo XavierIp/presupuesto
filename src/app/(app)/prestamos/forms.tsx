@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import { Check, Loader2, Search, X } from "lucide-react";
 import { AccountSelect } from "@/components/account-select";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import {
   respondPayment,
   saveEntry,
   savePayment,
+  setLoanDeadline,
 } from "./actions";
 
 function Submit({
@@ -110,6 +111,7 @@ export function LoanForm({
   const [interest, setInterest] = useState("");
   const [installments, setInstallments] = useState("1");
   const [firstDueOn, setFirstDueOn] = useState("");
+  const [cardTotal, setCardTotal] = useState<number | null>(null);
   const symbol = currencySymbol(currency);
   const isOpen = type === "open";
 
@@ -225,7 +227,7 @@ export function LoanForm({
       )}
 
       {!isOpen ? (
-        <>
+        <Fragment key="fixed">
           <div className="grid grid-cols-2 gap-4">
             <Field
               label={`Monto (${symbol})`}
@@ -270,39 +272,47 @@ export function LoanForm({
               error={errors.firstDueOn}
             />
           </div>
+          <LenderSourceFields
+            label="¿Con qué le prestas?"
+            sources={sources}
+            currency={currency}
+            defaultAccountId={null}
+            amount={parseMoney(amount) ?? undefined}
+            errors={errors}
+            onCardTotalChange={setCardTotal}
+          />
           <FixedPreview
             amount={amount}
             interest={interest}
             installments={installments}
             firstDueOn={firstDueOn}
             currency={currency}
+            cardTotal={cardTotal}
           />
-          <AccountSelect
-            label="¿De qué cuenta sale el dinero?"
-            name="accountId"
-            sources={sources}
-            currency={currency}
-            excludeTypes={["credit"]}
-            hint={
-              target === "user"
-                ? "Se descuenta cuando la persona acepte."
-                : undefined
-            }
-            error={errors.accountId}
-          />
-        </>
+        </Fragment>
       ) : (
-        <>
+        <Fragment key="open">
           <div className="grid grid-cols-2 gap-4">
             <Field
-              label="Día de pago (cada mes)"
+              label="Fecha límite (opcional)"
+              name="dueOn"
+              type="date"
+              min={today}
+              hint="Día en que debe pagarte todo."
+              error={errors.dueOn}
+            />
+            <Field
+              label="O día de pago mensual"
               name="payDay"
               inputMode="numeric"
               autoComplete="off"
               placeholder="Ej.: 30"
               maxLength={2}
+              hint="Si no pones fecha límite."
               error={errors.payDay}
             />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <Field
               label={`Límite (${symbol}, opcional)`}
               name="creditLimit"
@@ -330,7 +340,7 @@ export function LoanForm({
             noneLabel="Elegir en cada entrega"
             error={errors.accountId}
           />
-        </>
+        </Fragment>
       )}
 
       <Field
@@ -356,12 +366,15 @@ function FixedPreview({
   installments,
   firstDueOn,
   currency,
+  cardTotal,
 }: {
   amount: string;
   interest: string;
   installments: string;
   firstDueOn: string;
   currency: string;
+  /** Si lo compraste con tu tarjeta en cuotas: lo que suman esas cuotas. */
+  cardTotal: number | null;
 }) {
   const cents = parseMoney(amount);
   const n = Number(installments);
@@ -374,15 +387,19 @@ function FixedPreview({
     !Number.isFinite(rate)
   )
     return null;
-  const owed = totalOwed(cents, rate);
+  const owed = totalOwed(cardTotal ?? cents, rate);
   const schedule = /^\d{4}-\d{2}-\d{2}$/.test(firstDueOn)
     ? loanSchedule(owed, n, firstDueOn)
     : null;
   return (
     <p className="rounded-lg bg-muted px-3 py-2.5 text-sm" aria-live="polite">
       Te devolverá {formatMoney(owed, currency)}
-      {rate > 0 && (
-        <> (incluye {formatMoney(owed - cents, currency)} de interés)</>
+      {owed > cents && (
+        <>
+          {" "}
+          (incluye {formatMoney(owed - cents, currency)}{" "}
+          {cardTotal ? "de intereses de tu tarjeta" : "de interés"})
+        </>
       )}
       {n > 1
         ? ` en ${n} cuotas de ${formatMoney(schedule?.[0].amount ?? Math.floor(owed / n), currency)}`
@@ -406,12 +423,15 @@ export function RespondLoanForm({
   sources,
   amount,
   defaultAccountId,
+  paidWithCard = false,
 }: {
   loanId: string;
   currency: string;
   sources: PaymentSource[];
   amount: number;
   defaultAccountId: string | null;
+  /** Fue una compra con la tarjeta del prestamista: no te llega dinero. */
+  paidWithCard?: boolean;
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
     respondLoan,
@@ -420,11 +440,19 @@ export function RespondLoanForm({
   return (
     <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
       <input type="hidden" name="loanId" value={loanId} />
+      {paidWithCard && (
+        <p className="rounded-lg bg-muted px-3 py-2.5 text-sm">
+          Es algo que te compró con su tarjeta: no entra dinero a tus cuentas.
+          Al aceptar, le debes las cuotas en las fechas indicadas.
+        </p>
+      )}
       <AccountSelect
         label={
-          amount > 0
-            ? "¿A qué cuenta te llega el dinero?"
-            : "Cuenta donde recibirás lo que pidas"
+          paidWithCard
+            ? "¿Desde qué cuenta le pagarás? (opcional)"
+            : amount > 0
+              ? "¿A qué cuenta te llega el dinero?"
+              : "Cuenta donde recibirás lo que pidas"
         }
         name="accountId"
         sources={sources}
@@ -812,6 +840,38 @@ export function CloseLoanForm({
           {owes ? "Sí, me pagó todo" : "Eliminar préstamo"}
         </Button>
       </div>
+    </form>
+  );
+}
+
+/* ───────────── Fecha límite (cuenta libre) ───────────── */
+
+export function DeadlineForm({
+  loanId,
+  dueOn,
+  today,
+}: {
+  loanId: string;
+  dueOn: string | null;
+  today: string;
+}) {
+  const { state, formAction, pending, formRef } = useModalFormAction(
+    setLoanDeadline,
+    "Fecha límite guardada",
+  );
+  return (
+    <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
+      <input type="hidden" name="loanId" value={loanId} />
+      <Field
+        label="Debe pagarte todo hasta el"
+        name="dueOn"
+        type="date"
+        min={today}
+        defaultValue={dueOn ?? ""}
+        hint="Déjala vacía para volver al día de pago mensual."
+        error={state.fieldErrors?.dueOn}
+      />
+      <Submit pending={pending}>Guardar</Submit>
     </form>
   );
 }

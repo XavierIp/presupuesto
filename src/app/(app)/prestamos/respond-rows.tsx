@@ -44,6 +44,9 @@ export function RespondRows({
           >
             <RespondLoanForm
               loanId={loan.id}
+              paidWithCard={loan.entries.some(
+                (e) => e.status === "pending" && e.paidWithCard,
+              )}
               currency={loan.currency}
               sources={sources}
               amount={loan.principal}

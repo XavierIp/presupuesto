@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { loans } from "@/lib/db/schema";
 import {
+  entryDebt,
   installmentStatus,
   loanDueInMonth,
   openNextDue,
@@ -39,10 +40,13 @@ async function loadLoans(where: ReturnType<typeof and>) {
 function summarize(loan: LoanRow, userId: string, today: string) {
   const role =
     loan.lenderId === userId ? ("lender" as const) : ("borrower" as const);
-  const lent = loan.entries
-    .filter((e) => e.status === "accepted")
-    .reduce((sum, e) => sum + e.amount, 0);
-  const owed = totalOwed(lent, loan.interestRate);
+  const accepted = loan.entries.filter((e) => e.status === "accepted");
+  const lent = accepted.reduce((sum, e) => sum + e.amount, 0);
+  // Compras con tarjeta en cuotas: se devuelven las cuotas (con los intereses de la tarjeta).
+  const owed = totalOwed(
+    accepted.reduce((sum, e) => sum + entryDebt(e), 0),
+    loan.interestRate,
+  );
   const paid = loan.payments
     .filter((p) => p.status === "accepted")
     .reduce((sum, p) => sum + p.amount, 0);
@@ -73,9 +77,13 @@ function summarize(loan: LoanRow, userId: string, today: string) {
       .map((e) => e.disbursedOn!)
       .sort()[0] ?? null;
   const openDueOn =
-    loan.type === "open" && loan.payDay && startsOn && owed - paid > 0
-      ? openNextDue(loan.payDay, startsOn, today)
-      : null;
+    loan.type !== "open" || owed - paid <= 0
+      ? null
+      : loan.dueOn
+        ? loan.dueOn
+        : loan.payDay && startsOn
+          ? openNextDue(loan.payDay, startsOn, today)
+          : null;
   // Un préstamo pagado o cerrado ya no tiene deuda ni próximos pagos.
   const settled = loan.status !== "active" && loan.status !== "pending";
   const nextDue = settled
@@ -125,6 +133,7 @@ function summarize(loan: LoanRow, userId: string, today: string) {
     installments: loan.installments,
     firstDueOn: loan.firstDueOn,
     payDay: loan.payDay,
+    dueOn: loan.dueOn,
     creditLimit: loan.creditLimit,
     lenderAccountId: loan.lenderAccountId,
     borrowerAccountId: loan.borrowerAccountId,

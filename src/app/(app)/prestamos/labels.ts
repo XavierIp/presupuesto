@@ -7,6 +7,19 @@ export function describeTerms(loan: LoanSummary) {
   const rate = loan.interestRate
     ? ` · ${loan.interestRate / 100} % de interés`
     : "";
+  if (loan.type === "open" && loan.dueOn) {
+    return (
+      [
+        `${loan.role === "lender" ? "Te paga" : "Pagas"} cuando quiera`,
+        `todo hasta el ${formatDate(loan.dueOn)}`,
+        loan.creditLimit
+          ? `límite ${formatMoney(loan.creditLimit, loan.currency)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") + rate
+    );
+  }
   if (loan.type === "open") {
     return (
       [
