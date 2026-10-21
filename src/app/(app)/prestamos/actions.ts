@@ -402,6 +402,116 @@ const amountNote = z.object({
   note: z.string().trim().max(120),
 });
 
+/**
+ * Cuenta con la que el prestamista entrega dinero: efectivo, débito o ahorro (salida de préstamo)
+ * o tarjeta de crédito (se registra como gasto en la tarjeta, en 1 cuota o en cuotas).
+ */
+type Funding =
+  | {
+      id: string | null;
+      installments: number | null;
+      installmentAmount: number | null;
+    }
+  | { error: Record<string, string> };
+
+async function lenderFunding(
+  userId: string,
+  formData: FormData,
+  currency: string,
+): Promise<Funding> {
+  const accountId = String(formData.get("accountId") ?? "");
+  if (!accountId)
+    return {
+      id: null as string | null,
+      installments: null,
+      installmentAmount: null,
+    };
+  const account = await ownActiveAccount(userId, accountId);
+  if (!account || account.currency !== currency) {
+    return {
+      error: { accountId: "Elige una cuenta o tarjeta en la misma moneda." },
+    };
+  }
+  if (account.type !== "credit" || formData.get("payMode") !== "installments") {
+    return {
+      id: account.id as string | null,
+      installments: null,
+      installmentAmount: null,
+    };
+  }
+  const n = Number(formData.get("installments"));
+  if (!Number.isInteger(n) || n < 2 || n > 60) {
+    return { error: { installments: "Escribe entre 2 y 60 cuotas." } };
+  }
+  const rawEach = String(formData.get("installmentAmount") ?? "").trim();
+  let each: number | null = null;
+  if (rawEach) {
+    const parsed = money("el monto por cuota").safeParse(rawEach);
+    if (!parsed.success)
+      return { error: { installmentAmount: parsed.error.issues[0].message } };
+    each = parsed.data;
+  }
+  return {
+    id: account.id as string | null,
+    installments: n,
+    installmentAmount: each,
+  };
+}
+
+/**
+ * Salida de dinero del prestamista. Con tarjeta de crédito es un gasto en la tarjeta
+ * (sube su deuda y sus cuotas entran en el pago de cada mes); si no, una salida de préstamo.
+ */
+async function lenderOut(
+  tx: Tx,
+  {
+    loan,
+    accountId,
+    amount,
+    installments,
+    installmentAmount,
+    borrowerName,
+  }: {
+    loan: typeof loans.$inferSelect;
+    accountId: string | null;
+    amount: number;
+    installments: number | null;
+    installmentAmount: number | null;
+    borrowerName: string;
+  },
+) {
+  if (!accountId) return null;
+  const account = await ownActiveAccount(loan.lenderId, accountId);
+  if (!account) return null;
+  if (account.type !== "credit") {
+    return moveMoney(tx, {
+      userId: loan.lenderId,
+      accountId: account.id,
+      kind: "loan_out",
+      amount,
+      description: `Préstamo a ${borrowerName}`,
+      loanId: loan.id,
+    });
+  }
+  const [row] = await tx
+    .insert(transactions)
+    .values({
+      userId: loan.lenderId,
+      accountId: account.id,
+      kind: "expense",
+      amount,
+      installments,
+      installmentAmount: installments
+        ? (installmentAmount ?? Math.round(amount / installments))
+        : null,
+      description: `Préstamo a ${borrowerName} (con tarjeta)`,
+      loanId: loan.id,
+      occurredOn: todayIn(),
+    })
+    .returning({ id: transactions.id });
+  return row.id;
+}
+
 async function loanParty(loanId: string, userId: string) {
   const [loan] = await db
     .select()
@@ -453,13 +563,25 @@ export async function saveEntry(
     note: formData.get("note") ?? "",
   });
   if (!parsed.success) return fieldErrors(parsed.error);
-  const account = await cashAccount(
-    me.id,
-    String(formData.get("accountId") ?? ""),
-    party.loan.currency,
-  );
-  if ("error" in account)
-    return { ok: false, fieldErrors: { accountId: account.error! } };
+  let account: {
+    id: string | null;
+    installments: number | null;
+    installmentAmount: number | null;
+  };
+  if (party.role === "lender") {
+    const funding = await lenderFunding(me.id, formData, party.loan.currency);
+    if ("error" in funding) return { ok: false, fieldErrors: funding.error };
+    account = funding;
+  } else {
+    const cash = await cashAccount(
+      me.id,
+      String(formData.get("accountId") ?? ""),
+      party.loan.currency,
+    );
+    if ("error" in cash)
+      return { ok: false, fieldErrors: { accountId: cash.error! } };
+    account = { id: cash.id, installments: null, installmentAmount: null };
+  }
 
   const entryId = String(formData.get("entryId") ?? "");
   if (entryId) {
@@ -489,6 +611,8 @@ export async function saveEntry(
         amount: parsed.data.amount,
         note: parsed.data.note || null,
         accountId: account.id,
+        installments: account.installments,
+        installmentAmount: account.installmentAmount,
       })
       .where(eq(loanEntries.id, entry.id));
   } else {
@@ -500,6 +624,8 @@ export async function saveEntry(
       note: parsed.data.note || null,
       requestedBy: me.id,
       accountId: account.id,
+      installments: account.installments,
+      installmentAmount: account.installmentAmount,
       status: "pending",
     });
   }
@@ -551,33 +677,41 @@ export async function respondEntry(
     return { ok: true };
   }
 
-  const mine = await cashAccount(
-    me.id,
-    String(formData.get("accountId") ?? ""),
-    party.loan.currency,
-  );
-  if ("error" in mine)
-    return { ok: false, fieldErrors: { accountId: mine.error! } };
-
   const { loan } = party;
   // Una cuenta la eligió quien creó la entrada; la otra, quien responde.
-  const lenderAccountId = party.role === "lender" ? mine.id : entry.accountId;
-  const borrowerAccountId =
-    party.role === "borrower" ? mine.id : entry.accountId;
+  let lender = {
+    id: entry.accountId,
+    installments: entry.installments,
+    installmentAmount: entry.installmentAmount,
+  };
+  let borrowerAccountId = entry.accountId;
+  if (party.role === "lender") {
+    const funding = await lenderFunding(me.id, formData, loan.currency);
+    if ("error" in funding) return { ok: false, fieldErrors: funding.error };
+    lender = funding;
+  } else {
+    const cash = await cashAccount(
+      me.id,
+      String(formData.get("accountId") ?? ""),
+      loan.currency,
+    );
+    if ("error" in cash)
+      return { ok: false, fieldErrors: { accountId: cash.error! } };
+    borrowerAccountId = cash.id;
+  }
   const names = await partyNames(loan);
-  const lenderAccount = await stillOwned(loan.lenderId, lenderAccountId);
   const borrowerAccount = loan.borrowerId
     ? await stillOwned(loan.borrowerId, borrowerAccountId)
     : null;
 
   await db.transaction(async (tx) => {
-    const lenderTx = await moveMoney(tx, {
-      userId: loan.lenderId,
-      accountId: lenderAccount,
-      kind: "loan_out",
+    const lenderTx = await lenderOut(tx, {
+      loan,
+      accountId: lender.id,
       amount: entry.amount,
-      description: `Préstamo a ${names.borrower}`,
-      loanId: loan.id,
+      installments: lender.installments,
+      installmentAmount: lender.installmentAmount,
+      borrowerName: names.borrower,
     });
     const borrowerTx = loan.borrowerId
       ? await moveMoney(tx, {
@@ -595,6 +729,9 @@ export async function respondEntry(
         status: "accepted",
         respondedAt: new Date(),
         disbursedOn: todayIn(),
+        accountId: lender.id,
+        installments: lender.installments,
+        installmentAmount: lender.installmentAmount,
         lenderTransactionId: lenderTx,
         borrowerTransactionId: borrowerTx,
       })

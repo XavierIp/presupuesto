@@ -17,9 +17,14 @@ export function RespondRows({
   defaultCashId: string | null;
 }) {
   const myAccount =
-    (loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId) ?? defaultCashId;
+    (loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId) ??
+    defaultCashId;
   const money = (cents: number) => formatMoney(cents, loan.currency);
-  const trigger = (label: string) => ({ variant: "primary" as const, className: "h-10 px-3", label });
+  const trigger = (label: string) => ({
+    variant: "primary" as const,
+    className: "h-10 px-3",
+    label,
+  });
 
   return (
     <>
@@ -50,16 +55,27 @@ export function RespondRows({
       {loan.myActions.respondEntries.map((entry) => (
         <Row
           key={entry.id}
-          title={pendingTitle("entry", loan.role, loan.counterpart, money(entry.amount))}
+          title={pendingTitle(
+            "entry",
+            loan.role,
+            loan.counterpart,
+            money(entry.amount),
+          )}
           detail={entry.note ?? "Cuenta libre"}
         >
           <Modal
-            title={pendingTitle("entry", loan.role, loan.counterpart, money(entry.amount))}
+            title={pendingTitle(
+              "entry",
+              loan.role,
+              loan.counterpart,
+              money(entry.amount),
+            )}
             description={entry.note ?? undefined}
             trigger={trigger("Responder")}
           >
             <RespondEntryForm
               entryId={entry.id}
+              amount={entry.amount}
               role={loan.role}
               currency={loan.currency}
               sources={sources}
@@ -71,12 +87,22 @@ export function RespondRows({
       {loan.myActions.respondPayments.map((payment) => (
         <Row
           key={payment.id}
-          title={pendingTitle("payment", loan.role, loan.counterpart, money(payment.amount))}
+          title={pendingTitle(
+            "payment",
+            loan.role,
+            loan.counterpart,
+            money(payment.amount),
+          )}
           detail={`El ${formatDate(payment.paidOn)}${payment.note ? ` · ${payment.note}` : ""}`}
         >
           <Modal
             title="Confirmar abono"
-            description={pendingTitle("payment", loan.role, loan.counterpart, money(payment.amount))}
+            description={pendingTitle(
+              "payment",
+              loan.role,
+              loan.counterpart,
+              money(payment.amount),
+            )}
             trigger={trigger("Revisar")}
           >
             <RespondPaymentForm
@@ -93,7 +119,15 @@ export function RespondRows({
   );
 }
 
-function Row({ title, detail, children }: { title: string; detail: string; children: React.ReactNode }) {
+function Row({
+  title,
+  detail,
+  children,
+}: {
+  title: string;
+  detail: string;
+  children: React.ReactNode;
+}) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
       <div className="min-w-0">

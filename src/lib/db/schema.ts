@@ -291,6 +291,12 @@ export const loanEntries = pgTable(
     /** Cuenta que eligió quien creó la entrega o el pedido; el dinero se mueve al aceptarse. */
     accountId: text("account_id").references(() => financialAccounts.id, { onDelete: "set null" }),
     disbursedOn: date("disbursed_on", { mode: "string" }),
+    /**
+     * Si el prestamista pagó con su tarjeta de crédito: cuotas y monto por cuota.
+     * Se registra como gasto en la tarjeta (sube su deuda y entra en su estado de cuenta).
+     */
+    installments: integer("installments"),
+    installmentAmount: cents("installment_amount"),
     lenderTransactionId: text("lender_transaction_id").references(() => transactions.id, {
       onDelete: "set null",
     }),

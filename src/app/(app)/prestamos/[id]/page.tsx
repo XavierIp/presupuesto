@@ -78,6 +78,8 @@ async function LoanView({
       amount: e.amount,
       note: e.note,
       accountId: e.accountId,
+      installments: e.installments,
+      installmentAmount: e.installmentAmount,
       status: e.status,
       mine: e.requestedBy === data.user.id,
     })),
@@ -89,6 +91,8 @@ async function LoanView({
       amount: p.amount,
       note: p.note,
       accountId: p.accountId,
+      installments: null,
+      installmentAmount: null,
       status: p.status,
       mine: p.createdBy === data.user.id,
     })),
@@ -392,6 +396,9 @@ async function LoanView({
                       <p className="truncate text-[13px] text-muted-foreground">
                         {formatDate(h.date)}
                         {h.note ? ` · ${h.note}` : ""}
+                        {isLender && h.installments
+                          ? ` · con tarjeta en ${h.installments} cuotas`
+                          : ""}
                       </p>
                     </div>
                     <div className="text-right">

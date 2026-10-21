@@ -50,6 +50,13 @@
       "when": 1792558635623,
       "tag": "0006_short_eternity",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792591180699,
+      "tag": "0007_outstanding_expediter",
+      "breakpoints": true
     }
   ]
 }

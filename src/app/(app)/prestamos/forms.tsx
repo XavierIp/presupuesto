@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Segmented } from "@/components/ui/segmented";
 import { useModalFormAction } from "@/components/use-modal-form-action";
+import { LenderSourceFields } from "./lender-source";
 import type { PaymentSource } from "@/lib/accounts-shared";
 import { cleanDni } from "@/lib/dni";
 import { loanSchedule, percentToBasisPoints, totalOwed } from "@/lib/loans";
@@ -445,6 +446,9 @@ export type EditDefaults = {
   amount: number;
   note: string | null;
   accountId: string | null;
+  /** Solo entregas pagadas con tarjeta de crédito en cuotas. */
+  installments?: number | null;
+  installmentAmount?: number | null;
 };
 
 /**
@@ -502,17 +506,36 @@ export function EntryForm({
         maxLength={120}
         defaultValue={edit?.note ?? ""}
       />
-      <AccountSelect
-        label={isLender ? "¿De qué cuenta sale?" : "¿A qué cuenta te llega?"}
-        name="accountId"
-        sources={sources}
-        currency={currency}
-        excludeTypes={["credit"]}
-        defaultValue={edit ? edit.accountId : defaultAccountId}
-        noneLabel="No registrar en mis cuentas"
-        hint="El dinero se mueve solo cuando la otra persona lo acepte."
-        error={state.fieldErrors?.accountId}
-      />
+      {isLender ? (
+        <LenderSourceFields
+          label="¿Con qué le prestas?"
+          sources={sources}
+          currency={currency}
+          defaultAccountId={edit ? edit.accountId : defaultAccountId}
+          amount={edit?.amount}
+          defaults={
+            edit
+              ? {
+                  installments: edit.installments ?? null,
+                  installmentAmount: edit.installmentAmount ?? null,
+                }
+              : undefined
+          }
+          errors={state.fieldErrors ?? {}}
+        />
+      ) : (
+        <AccountSelect
+          label="¿A qué cuenta te llega?"
+          name="accountId"
+          sources={sources}
+          currency={currency}
+          excludeTypes={["credit"]}
+          defaultValue={edit ? edit.accountId : defaultAccountId}
+          noneLabel="No registrar en mis cuentas"
+          hint="El dinero se mueve solo cuando la otra persona lo acepte."
+          error={state.fieldErrors?.accountId}
+        />
+      )}
       <Submit pending={pending}>
         {edit ? "Guardar cambios" : isLender ? "Entregar" : "Enviar pedido"}
       </Submit>
@@ -527,6 +550,7 @@ export function RespondEntryForm({
   currency,
   sources,
   defaultAccountId,
+  amount,
 }: {
   entryId: string;
   /** Mi rol en el préstamo. */
@@ -534,6 +558,8 @@ export function RespondEntryForm({
   currency: string;
   sources: PaymentSource[];
   defaultAccountId: string | null;
+  /** Monto pedido (para sugerir las cuotas si se paga con tarjeta). */
+  amount?: number;
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
     respondEntry,
@@ -543,20 +569,27 @@ export function RespondEntryForm({
   return (
     <form ref={formRef} action={formAction} className="grid gap-4" noValidate>
       <input type="hidden" name="entryId" value={entryId} />
-      <AccountSelect
-        label={
-          isLender
-            ? "¿De qué cuenta sale el dinero?"
-            : "¿A qué cuenta te llegó?"
-        }
-        name="accountId"
-        sources={sources}
-        currency={currency}
-        excludeTypes={["credit"]}
-        defaultValue={defaultAccountId}
-        noneLabel="No registrar en mis cuentas"
-        error={state.fieldErrors?.accountId}
-      />
+      {isLender ? (
+        <LenderSourceFields
+          label="¿Con qué le prestas?"
+          sources={sources}
+          currency={currency}
+          defaultAccountId={defaultAccountId}
+          amount={amount}
+          errors={state.fieldErrors ?? {}}
+        />
+      ) : (
+        <AccountSelect
+          label="¿A qué cuenta te llegó?"
+          name="accountId"
+          sources={sources}
+          currency={currency}
+          excludeTypes={["credit"]}
+          defaultValue={defaultAccountId}
+          noneLabel="No registrar en mis cuentas"
+          error={state.fieldErrors?.accountId}
+        />
+      )}
       <DecisionButtons
         pending={pending}
         acceptLabel={isLender ? "Aceptar y entregar" : "Confirmar"}

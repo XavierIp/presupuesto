@@ -44,7 +44,7 @@ export function MovementFilters({
       <div
         role="group"
         aria-label="Tipo"
-        className="inline-flex gap-1 rounded-lg bg-muted p-1"
+        className="flex max-w-full flex-wrap gap-1 rounded-lg bg-muted p-1"
       >
         {KINDS.map((k) => (
           <button
@@ -70,7 +70,7 @@ export function MovementFilters({
         id="filtro-cuenta"
         value={account}
         onChange={(e) => update("cuenta", e.target.value)}
-        className="h-11 rounded-lg border bg-card px-3 text-sm text-foreground"
+        className="h-11 max-w-full rounded-lg border bg-card px-3 text-base text-foreground"
       >
         <option value="">Todas las cuentas</option>
         {accounts.map((a) => (

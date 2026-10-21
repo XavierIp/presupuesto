@@ -16,6 +16,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // Zoom bloqueado: la app se ve igual en todas las pantallas del móvil.
+  maximumScale: 1,
+  userScalable: false,
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
     { media: "(prefers-color-scheme: dark)", color: "#0b1220" },
@@ -23,7 +28,8 @@ export const viewport: Viewport = {
 };
 
 // Aplica el tema guardado antes de pintar, para evitar el destello del tema equivocado.
-const themeScript = `try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
+// También bloquea el gesto de zoom de Safari en iOS, que no respeta user-scalable=no.
+const themeScript = `try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}document.addEventListener("gesturestart",function(e){e.preventDefault()});`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

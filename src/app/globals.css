@@ -96,10 +96,25 @@
   * {
     border-color: var(--border);
   }
+  html {
+    /* Sin zoom con dos dedos ni doble toque (iOS ignora user-scalable=no). */
+    touch-action: pan-x pan-y;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
   body {
     background: var(--background);
     color: var(--foreground);
     -webkit-tap-highlight-color: transparent;
+    /* Red de seguridad: nada debe poder ensanchar la página en móvil. */
+    overflow-x: clip;
+  }
+  /*
+   * En una grilla, cada elemento toma como ancho mínimo el de su contenido más largo
+   * (aunque esté recortado con "…"); eso ensanchaba páginas enteras en móvil.
+   */
+  .grid > * {
+    min-width: 0;
   }
   :focus-visible {
     outline: 2px solid var(--ring);
