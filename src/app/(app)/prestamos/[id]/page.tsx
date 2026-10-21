@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import {
+  Archive,
   ArrowDownLeft,
   ArrowLeft,
   ArrowUpRight,
@@ -24,6 +25,8 @@ import { cancelEntry, cancelLoan, cancelPayment } from "../actions";
 import {
   CloseLoanForm,
   DeadlineForm,
+  DeleteLoanForm,
+  HideLoanButton,
   EntryForm,
   PaymentForm,
   RespondLoanForm,
@@ -54,9 +57,12 @@ async function LoanView({
   const { id } = await params;
   const data = await getLoanDetail(id);
   if (!data) notFound();
-  const { loan, sources, defaultCashId } = data;
+  const { loan, sources, defaultCashId, movements } = data;
   const isLender = loan.role === "lender";
   const active = loan.status === "active";
+  const closed = loan.status !== "active" && loan.status !== "pending";
+  // Compras con mi tarjeta que siguen en mi deuda aunque el préstamo se cerró.
+  const cardMovements = movements.filter((m) => m.kind === "expense");
   const status = LOAN_STATUS[loan.status];
   const ratio = loan.owed > 0 ? Math.min(loan.paid / loan.owed, 1) : 0;
   const myAccount =
@@ -250,15 +256,15 @@ async function LoanView({
         )}
         {isLender && active && (
           <Modal
-            title="Eliminar préstamo"
+            title="Cerrar préstamo"
             description={`Con ${loan.counterpart}`}
             trigger={{
               variant: "ghost",
               className: "text-expense hover:bg-expense/10",
               label: (
                 <>
-                  <Trash2 className="size-4" aria-hidden />
-                  Eliminar préstamo
+                  <Archive className="size-4" aria-hidden />
+                  Cerrar préstamo
                 </>
               ),
             }}
@@ -271,9 +277,70 @@ async function LoanView({
               sources={sources}
               defaultAccountId={myAccount}
             />
+            <div className="mt-6 border-t pt-5">
+              <DeleteLoanForm
+                loanId={loan.id}
+                currency={loan.currency}
+                movements={movements}
+                withOther={!loan.isExternal}
+              />
+            </div>
           </Modal>
         )}
       </div>
+
+      {closed && (
+        <section
+          aria-label="Préstamo cerrado"
+          className="grid gap-4 rounded-xl border bg-card p-5"
+        >
+          <div className="grid gap-1">
+            <p className="font-medium">
+              {loan.status === "paid"
+                ? "Préstamo pagado"
+                : loan.status === "rejected"
+                  ? "Préstamo rechazado"
+                  : "Préstamo cerrado"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Ya no tiene pagos pendientes ni aparece en tu agenda.
+            </p>
+            {isLender && cardMovements.length > 0 && (
+              <p className="mt-2 rounded-lg bg-warning/10 px-3 py-2.5 text-sm text-foreground">
+                La compra con tu tarjeta {cardMovements[0].accountName} sigue
+                sumando a tu deuda: el banco te la cobra igual. Si fue un error
+                o la registraste dos veces, bórrala por completo.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <HideLoanButton loanId={loan.id} />
+            {isLender && (
+              <Modal
+                title="Borrar préstamo"
+                description={`Con ${loan.counterpart}`}
+                trigger={{
+                  variant: "ghost",
+                  className: "text-expense hover:bg-expense/10",
+                  label: (
+                    <>
+                      <Trash2 className="size-4" aria-hidden />
+                      Borrar por completo
+                    </>
+                  ),
+                }}
+              >
+                <DeleteLoanForm
+                  loanId={loan.id}
+                  currency={loan.currency}
+                  movements={movements}
+                  withOther={!loan.isExternal}
+                />
+              </Modal>
+            )}
+          </div>
+        </section>
+      )}
 
       <section aria-label="Resumen" className="grid gap-4 sm:grid-cols-3">
         <Stat

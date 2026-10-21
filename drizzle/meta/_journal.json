@@ -71,6 +71,13 @@
       "when": 1792593006919,
       "tag": "0009_foamy_silver_fox",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792597990491,
+      "tag": "0010_hard_tiger_shark",
+      "breakpoints": true
     }
   ]
 }

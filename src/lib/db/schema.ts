@@ -236,6 +236,9 @@ export const loans = pgTable(
       onDelete: "set null",
     }),
     note: text("note"),
+    /** Cada parte puede ocultar de su historial un préstamo ya cerrado. */
+    hiddenByLender: boolean("hidden_by_lender").notNull().default(false),
+    hiddenByBorrower: boolean("hidden_by_borrower").notNull().default(false),
     respondedAt: timestamp("responded_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

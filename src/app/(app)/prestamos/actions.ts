@@ -1156,3 +1156,51 @@ export async function setLoanDeadline(
   refresh();
   return { ok: true };
 }
+
+/* ───────────── Borrar u ocultar ───────────── */
+
+/**
+ * El prestamista borra un préstamo registrado por error: desaparece para ambos y se deshacen
+ * sus movimientos (salidas, abonos y la compra en la tarjeta, que deja de sumar a su deuda).
+ */
+export async function deleteLoan(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const me = await getCurrentUser();
+  const loan = await loanFor(String(formData.get("loanId")), me.id, "lender");
+  if (!loan) return { ok: false, error: "No encontramos este préstamo." };
+  await db.transaction(async (tx) => {
+    await tx.delete(transactions).where(eq(transactions.loanId, loan.id));
+    await tx.delete(loans).where(eq(loans.id, loan.id));
+  });
+  // Sin refresh(): esta página deja de existir y el formulario vuelve a /prestamos.
+  return { ok: true };
+}
+
+/** Cualquiera de las partes quita de su historial un préstamo cerrado (sus movimientos se quedan). */
+export async function hideLoan(loanId: string): Promise<FormState> {
+  const me = await getCurrentUser();
+  const [loan] = await db
+    .select()
+    .from(loans)
+    .where(
+      and(
+        eq(loans.id, loanId),
+        or(eq(loans.lenderId, me.id), eq(loans.borrowerId, me.id)),
+      ),
+    )
+    .limit(1);
+  if (!loan || loan.status === "active" || loan.status === "pending")
+    return { ok: false, error: "Solo puedes ocultar préstamos cerrados." };
+  await db
+    .update(loans)
+    .set(
+      loan.lenderId === me.id
+        ? { hiddenByLender: true }
+        : { hiddenByBorrower: true },
+    )
+    .where(eq(loans.id, loan.id));
+  refresh();
+  return { ok: true };
+}

@@ -93,9 +93,7 @@ async function LoansView() {
           empty="Nadie te ha prestado dinero."
           loans={data.borrowed}
         />
-        {data.closed.length > 0 && (
-          <LoanList title="Historial" empty="" loans={data.closed} muted />
-        )}
+        {data.closed.length > 0 && <History loans={data.closed} />}
       </div>
     </>
   );
@@ -131,12 +129,10 @@ function LoanList({
   title,
   empty,
   loans,
-  muted,
 }: {
   title: string;
   empty: string;
   loans: LoanSummary[];
-  muted?: boolean;
 }) {
   return (
     <section className="grid gap-4">
@@ -146,13 +142,41 @@ function LoanList({
           {empty}
         </p>
       ) : (
-        <ul className={cn("grid gap-3 sm:grid-cols-2", muted && "opacity-80")}>
+        <ul className="grid gap-3 sm:grid-cols-2">
           {loans.map((loan) => (
             <LoanCard key={loan.id} loan={loan} />
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+/** Préstamos cerrados, plegados para no estorbar. Cada uno se puede quitar desde su detalle. */
+function History({ loans }: { loans: LoanSummary[] }) {
+  return (
+    <details className="group grid gap-4">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl border bg-card px-5 py-4 [&::-webkit-details-marker]:hidden">
+        <span className="grid gap-0.5">
+          <span className="font-semibold">Historial</span>
+          <span className="text-[13px] text-muted-foreground">
+            {loans.length === 1
+              ? "1 préstamo cerrado"
+              : `${loans.length} préstamos cerrados`}{" "}
+            · ábrelo para verlos o quitarlos
+          </span>
+        </span>
+        <ChevronRight
+          className="size-5 text-muted-foreground transition-transform duration-200 ease-out group-open:rotate-90"
+          aria-hidden
+        />
+      </summary>
+      <ul className="mt-4 grid gap-3 opacity-80 sm:grid-cols-2">
+        {loans.map((loan) => (
+          <LoanCard key={loan.id} loan={loan} />
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -195,11 +219,17 @@ function LoanCard({ loan }: { loan: LoanSummary }) {
                 ? loan.role === "lender"
                   ? "Te debe"
                   : "Debes"
-                : "Saldo"}
+                : loan.role === "lender"
+                  ? "Prestaste"
+                  : "Te prestó"}
             </p>
             <p className="text-[22px] font-semibold tracking-[-0.01em] tabular-nums">
               {formatMoney(
-                loan.status === "pending" ? loan.principal : loan.balance,
+                loan.status === "pending"
+                  ? loan.principal
+                  : loan.status === "active"
+                    ? loan.balance
+                    : loan.lent || loan.principal,
                 loan.currency,
               )}
             </p>

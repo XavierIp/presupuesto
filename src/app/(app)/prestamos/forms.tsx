@@ -1,7 +1,10 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
-import { Check, Loader2, Search, X } from "lucide-react";
+import { Fragment, useActionState, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Check, EyeOff, Loader2, Search, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import type { FormState } from "@/app/(app)/actions";
 import { AccountSelect } from "@/components/account-select";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -21,6 +24,8 @@ import { formatDate } from "@/lib/schedule";
 import {
   closeLoan,
   createLoan,
+  deleteLoan,
+  hideLoan,
   lookupBorrower,
   respondEntry,
   respondLoan,
@@ -765,7 +770,7 @@ export function RespondPaymentForm({
   );
 }
 
-/* ───────────── Eliminar (cerrar) préstamo ───────────── */
+/* ───────────── Cerrar préstamo ───────────── */
 
 /** Pregunta si la otra persona pagó todo antes de cerrar el préstamo. */
 export function CloseLoanForm({
@@ -785,7 +790,7 @@ export function CloseLoanForm({
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
     closeLoan,
-    "Préstamo eliminado",
+    "Préstamo cerrado",
   );
   const owes = balance > 0;
   return (
@@ -794,7 +799,7 @@ export function CloseLoanForm({
       <p className="text-[17px] font-medium">
         {owes
           ? `¿${counterpart} te llegó a pagar todo el monto (${formatMoney(balance, currency)})?`
-          : `${counterpart} ya pagó todo. ¿Eliminar el préstamo?`}
+          : `${counterpart} ya pagó todo. ¿Cerrar el préstamo?`}
       </p>
       {owes && (
         <AccountSelect
@@ -809,7 +814,8 @@ export function CloseLoanForm({
         />
       )}
       <p className="text-[13px] text-muted-foreground">
-        El préstamo pasa al historial de ambos y ya no tendrá pagos pendientes.
+        Pasa al historial de ambos, sin pagos pendientes. Lo que ya se movió en
+        tus cuentas y tarjetas se queda como está.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {owes && (
@@ -821,7 +827,7 @@ export function CloseLoanForm({
             size="lg"
             disabled={pending}
           >
-            No, eliminar sin cobrar
+            No, cerrar sin cobrar
           </Button>
         )}
         <Button
@@ -837,7 +843,7 @@ export function CloseLoanForm({
           ) : (
             <Check className="size-4" aria-hidden />
           )}
-          {owes ? "Sí, me pagó todo" : "Eliminar préstamo"}
+          {owes ? "Sí, me pagó todo" : "Cerrar préstamo"}
         </Button>
       </div>
     </form>
@@ -873,5 +879,131 @@ export function DeadlineForm({
       />
       <Submit pending={pending}>Guardar</Submit>
     </form>
+  );
+}
+
+/* ───────────── Borrar por error ───────────── */
+
+export type LoanMovement = {
+  id: string;
+  kind: string;
+  amount: number;
+  installments: number | null;
+  installmentAmount: number | null;
+  accountName: string;
+  accountType: string;
+};
+
+/** "Gasto de S/ 569.00 en IO (4 cuotas de S/ 156.72)" */
+function describeMovement(m: LoanMovement, currency: string) {
+  const what =
+    m.kind === "expense"
+      ? "Compra con tarjeta"
+      : m.kind === "loan_out"
+        ? "Salida"
+        : "Abono";
+  const total =
+    m.installments && m.installments > 1 && m.installmentAmount
+      ? m.installments * m.installmentAmount
+      : m.amount;
+  const plan =
+    m.installments && m.installments > 1 && m.installmentAmount
+      ? ` (${m.installments} cuotas de ${formatMoney(m.installmentAmount, currency)})`
+      : "";
+  return `${what} de ${formatMoney(total, currency)} en ${m.accountName}${plan}`;
+}
+
+/** Borra el préstamo para ambos y deshace sus movimientos (también la compra en la tarjeta). */
+export function DeleteLoanForm({
+  loanId,
+  currency,
+  movements,
+  withOther,
+}: {
+  loanId: string;
+  currency: string;
+  movements: LoanMovement[];
+  /** La otra persona usa la app: también se le borra. */
+  withOther: boolean;
+}) {
+  const router = useRouter();
+  const [state, formAction, pending] = useActionState<FormState, FormData>(
+    async (prev, formData) => {
+      const result = await deleteLoan(prev, formData);
+      if (result.ok) {
+        toast.success("Préstamo borrado");
+        router.replace("/prestamos");
+        router.refresh();
+      } else if (result.error) toast.error(result.error);
+      return result;
+    },
+    { ok: false },
+  );
+  return (
+    <form action={formAction} className="grid gap-3">
+      <input type="hidden" name="loanId" value={loanId} />
+      <p className="text-[15px] font-medium">¿Lo registraste por error o dos veces?</p>
+      <p className="text-[13px] text-muted-foreground">
+        Bórralo por completo: desaparece {withOther ? "para ambos" : "de tu historial"} y se
+        deshace lo que movió{movements.length > 0 ? ":" : "."}
+      </p>
+      {movements.length > 0 && (
+        <ul className="grid gap-1.5 rounded-lg bg-muted px-3 py-2.5 text-sm">
+          {movements.map((m) => (
+            <li key={m.id} className="flex items-start gap-2">
+              <X className="mt-0.5 size-3.5 shrink-0 text-expense" aria-hidden />
+              <span>{describeMovement(m, currency)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {state.error && (
+        <p role="alert" className="text-sm text-expense">
+          {state.error}
+        </p>
+      )}
+      <Button
+        type="submit"
+        variant="secondary"
+        size="lg"
+        disabled={pending}
+        className="border-expense/40 text-expense hover:bg-expense/10"
+      >
+        {pending ? (
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+        ) : (
+          <Trash2 className="size-4" aria-hidden />
+        )}
+        Borrar por completo
+      </Button>
+    </form>
+  );
+}
+
+/** Quita un préstamo cerrado de mi historial; la otra persona lo sigue viendo. */
+export function HideLoanButton({ loanId }: { loanId: string }) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  return (
+    <Button
+      type="button"
+      variant="secondary"
+      disabled={pending}
+      onClick={() =>
+        startTransition(async () => {
+          const result = await hideLoan(loanId);
+          if (!result.ok) return void toast.error(result.error ?? "No se pudo ocultar.");
+          toast.success("Quitado de tu historial");
+          router.replace("/prestamos");
+        })
+      }
+    >
+      {pending ? (
+        <Loader2 className="size-4 animate-spin" aria-hidden />
+      ) : (
+        <EyeOff className="size-4" aria-hidden />
+      )}
+      Quitar de mi historial
+    </Button>
   );
 }

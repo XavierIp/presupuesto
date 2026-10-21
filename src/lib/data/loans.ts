@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { loans } from "@/lib/db/schema";
+import { financialAccounts, loans, transactions } from "@/lib/db/schema";
 import {
   entryDebt,
   installmentStatus,
@@ -127,6 +127,7 @@ function summarize(loan: LoanRow, userId: string, today: string) {
     role,
     counterpart,
     isExternal: !loan.borrowerId,
+    hidden: role === "lender" ? loan.hiddenByLender : loan.hiddenByBorrower,
     currency: loan.currency,
     note: loan.note,
     interestRate: loan.interestRate,
@@ -189,7 +190,7 @@ export async function getLoansPage() {
     today,
     lent: lent.filter(open),
     borrowed: borrowed.filter(open),
-    closed: all.filter((l) => !open(l)),
+    closed: all.filter((l) => !open(l) && !l.hidden),
     owedToMe: sum(lent),
     iOwe: sum(borrowed),
     actions: all.filter((l) => l.actionCount > 0),
@@ -213,9 +214,24 @@ export async function getLoanDetail(loanId: string) {
     accountBalances(user.id),
   ]);
   if (!rows[0]) return null;
+  // Mis movimientos ligados al préstamo: lo que se deshace si lo borro por error.
+  const movements = await db
+    .select({
+      id: transactions.id,
+      kind: transactions.kind,
+      amount: transactions.amount,
+      installments: transactions.installments,
+      installmentAmount: transactions.installmentAmount,
+      accountName: financialAccounts.name,
+      accountType: financialAccounts.type,
+    })
+    .from(transactions)
+    .innerJoin(financialAccounts, eq(financialAccounts.id, transactions.accountId))
+    .where(and(eq(transactions.loanId, loanId), eq(transactions.userId, user.id)));
   return {
     user,
     today,
+    movements,
     loan: summarize(rows[0], user.id, today),
     sources: toPaymentSources(accounts),
     defaultCashId: defaultCashSource(
