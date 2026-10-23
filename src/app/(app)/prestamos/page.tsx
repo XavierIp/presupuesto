@@ -6,7 +6,6 @@ import {
   ArrowUpRight,
   Bell,
   ChevronRight,
-  HandCoins,
   Plus,
 } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
@@ -37,7 +36,7 @@ async function LoansView() {
     <>
       <PageHeader
         title="Préstamos"
-        description="Lo que prestas y lo que te prestan, con sus cuotas y abonos."
+        description="Quién te debe, a quién le debes y cuándo toca pagar."
         actions={
           <Modal
             title="Prestar dinero"
@@ -60,39 +59,49 @@ async function LoansView() {
         }
       />
 
-      <div className="grid gap-10">
+      <div className="grid gap-8">
         {data.actions.length > 0 && <PendingActions data={data} />}
 
+        {/* Lo que me deben y lo que debo, lado a lado */}
         <section
           aria-label="Resumen"
-          className="stagger grid gap-4 sm:grid-cols-2"
+          className="grid grid-cols-2 gap-3 sm:gap-4"
         >
           <Stat
-            index={0}
-            icon={ArrowUpRight}
+            href="#me-deben"
+            icon={ArrowDownLeft}
             label="Me deben"
             value={formatMoney(data.owedToMe, currency)}
+            count={activeCount(data.lent)}
             tone="income"
           />
           <Stat
-            index={1}
-            icon={ArrowDownLeft}
+            href="#debo"
+            icon={ArrowUpRight}
             label="Debo"
             value={formatMoney(data.iOwe, currency)}
-            tone={data.iOwe > 0 ? "expense" : undefined}
+            count={activeCount(data.borrowed)}
+            tone="expense"
           />
         </section>
 
-        <LoanList
-          title="Presté"
-          empty="Aún no has prestado dinero."
-          loans={data.lent}
-        />
-        <LoanList
-          title="Me prestaron"
-          empty="Nadie te ha prestado dinero."
-          loans={data.borrowed}
-        />
+        <div className="grid gap-8 lg:grid-cols-2 lg:gap-6">
+          <LoanList
+            id="me-deben"
+            title="Me deben"
+            hint="Lo que prestaste"
+            empty="Nadie te debe. Toca «Prestar» para registrar un préstamo."
+            loans={data.lent}
+          />
+          <LoanList
+            id="debo"
+            title="Debo"
+            hint="Lo que te prestaron"
+            empty="No debes nada. Cuando alguien te preste por tu DNI, aparecerá aquí."
+            loans={data.borrowed}
+          />
+        </div>
+
         {data.closed.length > 0 && <History loans={data.closed} />}
       </div>
     </>
@@ -100,6 +109,9 @@ async function LoansView() {
 }
 
 type Data = Awaited<ReturnType<typeof getLoansPage>>;
+
+const activeCount = (loans: LoanSummary[]) =>
+  loans.filter((l) => l.status === "active").length;
 
 function PendingActions({ data }: { data: Data }) {
   return (
@@ -126,23 +138,39 @@ function PendingActions({ data }: { data: Data }) {
 }
 
 function LoanList({
+  id,
   title,
+  hint,
   empty,
   loans,
 }: {
+  id: string;
   title: string;
+  hint: string;
   empty: string;
   loans: LoanSummary[];
 }) {
   return (
-    <section className="grid gap-4">
-      <h2 className="text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
+    <section
+      id={id}
+      aria-labelledby={`${id}-title`}
+      className="grid scroll-mt-20 content-start gap-3"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <h2
+          id={`${id}-title`}
+          className="text-[22px] font-semibold tracking-[-0.01em]"
+        >
+          {title}
+        </h2>
+        <p className="text-[13px] text-muted-foreground">{hint}</p>
+      </div>
       {loans.length === 0 ? (
-        <p className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+        <p className="rounded-xl border border-dashed p-5 text-sm text-muted-foreground">
           {empty}
         </p>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="grid gap-3">
           {loans.map((loan) => (
             <LoanCard key={loan.id} loan={loan} />
           ))}
@@ -171,7 +199,7 @@ function History({ loans }: { loans: LoanSummary[] }) {
           aria-hidden
         />
       </summary>
-      <ul className="mt-4 grid gap-3 opacity-80 sm:grid-cols-2">
+      <ul className="mt-4 grid gap-3 opacity-80 lg:grid-cols-2">
         {loans.map((loan) => (
           <LoanCard key={loan.id} loan={loan} />
         ))}
@@ -180,90 +208,119 @@ function History({ loans }: { loans: LoanSummary[] }) {
   );
 }
 
+/** Una persona, cuánto falta y cuándo es el próximo pago. */
 function LoanCard({ loan }: { loan: LoanSummary }) {
   const ratio = loan.owed > 0 ? Math.min(loan.paid / loan.owed, 1) : 0;
   const status = LOAN_STATUS[loan.status];
+  const lender = loan.role === "lender";
+  const open = loan.status === "active" || loan.status === "pending";
+  const kind =
+    loan.type === "open"
+      ? "Cuenta libre"
+      : loan.installments && loan.installments > 1
+        ? `En ${loan.installments} cuotas`
+        : "Pago único";
+  const amount =
+    loan.status === "pending"
+      ? loan.principal
+      : open
+        ? loan.balance
+        : loan.lent || loan.principal;
+
   return (
     <li>
       <Link
         href={`/prestamos/${loan.id}`}
-        className="grid gap-3 rounded-xl border bg-card p-5 transition-colors duration-150 hover:border-primary/40"
+        className="pressable grid gap-3 rounded-xl border bg-card p-4 transition-colors duration-150 hover:border-primary/40 sm:p-5"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="flex items-center gap-2 truncate font-semibold">
-              <HandCoins
-                className="size-4 shrink-0 text-muted-foreground"
-                aria-hidden
-              />
-              <span className="truncate">{loan.counterpart}</span>
-            </p>
-            <p className="text-[13px] text-muted-foreground">
-              {loan.type === "open" ? "Cuenta libre" : "Con condiciones"}
-              {loan.isExternal && " · externo"}
-            </p>
-          </div>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[12px] font-medium whitespace-nowrap",
-              status.tone,
-            )}
-          >
-            {status.label}
-          </span>
-        </div>
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <p className="text-[13px] text-muted-foreground">
-              {loan.status === "active" || loan.status === "pending"
-                ? loan.role === "lender"
-                  ? "Te debe"
-                  : "Debes"
-                : loan.role === "lender"
-                  ? "Prestaste"
-                  : "Te prestó"}
-            </p>
-            <p className="text-[22px] font-semibold tracking-[-0.01em] tabular-nums">
-              {formatMoney(
-                loan.status === "pending"
-                  ? loan.principal
-                  : loan.status === "active"
-                    ? loan.balance
-                    : loan.lent || loan.principal,
-                loan.currency,
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span
+              className={cn(
+                "inline-flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+                lender
+                  ? "bg-income/10 text-income"
+                  : "bg-expense/10 text-expense",
               )}
-            </p>
-          </div>
-          <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
-        </div>
-        {loan.owed > 0 && (
-          <div className="grid gap-1.5">
-            <div className="flex justify-between text-[13px] text-muted-foreground tabular-nums">
-              <span>
-                Pagado {formatMoney(loan.paid, loan.currency)} de{" "}
-                {formatMoney(loan.owed, loan.currency)}
-              </span>
-              {loan.nextDue && (
-                <span className={cn(loan.overdue && "text-expense")}>
-                  {loan.overdue ? "Vencido" : "Próximo"}{" "}
-                  {formatDate(loan.nextDue.dueOn, { withYear: false })}
-                </span>
-              )}
-            </div>
-            <div
-              className="h-1.5 overflow-hidden rounded-full bg-muted"
               aria-hidden
             >
-              <div
-                className="progress-fill h-full rounded-full bg-income"
-                style={{ "--progress": ratio } as React.CSSProperties}
-              />
+              {initials(loan.counterpart)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate font-semibold">{loan.counterpart}</p>
+              <p className="truncate text-[13px] text-muted-foreground">
+                {kind}
+                {loan.isExternal && " · no usa la app"}
+              </p>
             </div>
           </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[20px] leading-tight font-semibold tracking-[-0.01em] tabular-nums">
+              {formatMoney(amount, loan.currency)}
+            </p>
+            <p className="text-[12px] text-muted-foreground">
+              {open
+                ? lender
+                  ? "te debe"
+                  : "debes"
+                : lender
+                  ? "prestaste"
+                  : "te prestó"}
+            </p>
+          </div>
+        </div>
+
+        {loan.status === "active" && loan.owed > 0 && (
+          <div
+            className="h-1.5 overflow-hidden rounded-full bg-muted"
+            role="progressbar"
+            aria-label="Avance del pago"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(ratio * 100)}
+          >
+            <div
+              className="progress-fill h-full rounded-full bg-income"
+              style={{ "--progress": ratio } as React.CSSProperties}
+            />
+          </div>
         )}
+
+        <div className="flex items-center justify-between gap-3 text-[13px]">
+          {loan.status !== "active" ? (
+            <span
+              className={cn("rounded-full px-2 py-0.5 font-medium", status.tone)}
+            >
+              {status.label}
+            </span>
+          ) : loan.nextDue ? (
+            <span
+              className={cn(
+                "text-muted-foreground",
+                loan.overdue && "font-medium text-expense",
+              )}
+            >
+              {loan.overdue ? "Vencido desde el" : "Próximo pago:"}{" "}
+              {formatDate(loan.nextDue.dueOn, { withYear: false })} ·{" "}
+              <span className="tabular-nums">
+                {formatMoney(loan.nextDue.remaining, loan.currency)}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              Pagado {formatMoney(loan.paid, loan.currency)} de{" "}
+              {formatMoney(loan.owed, loan.currency)}
+            </span>
+          )}
+          <ChevronRight
+            className="size-4 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
+        </div>
+
         {loan.pendingRequested > 0 && (
           <p className="text-[13px] font-medium text-warning">
-            Pedido pendiente:{" "}
+            Pedido por confirmar:{" "}
             {formatMoney(loan.pendingRequested, loan.currency)}
           </p>
         )}
@@ -272,56 +329,78 @@ function LoanCard({ loan }: { loan: LoanSummary }) {
   );
 }
 
+/** "Denis Adeyaneira" → "DA" */
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+}
+
 function Stat({
-  index,
+  href,
   icon: Icon,
   label,
   value,
+  count,
   tone,
 }: {
-  index: number;
+  href: string;
   icon: typeof ArrowUpRight;
   label: string;
   value: string;
-  tone?: "income" | "expense";
+  count: number;
+  tone: "income" | "expense";
 }) {
   return (
-    <article
-      style={{ "--i": index } as React.CSSProperties}
-      className="grid gap-2 rounded-xl border bg-card p-5"
+    <a
+      href={href}
+      className="pressable grid min-w-0 gap-2 rounded-xl border bg-card p-4 transition-colors duration-150 hover:border-primary/40 sm:p-5"
     >
-      <p className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
-        <Icon className="size-4" aria-hidden />
+      <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+        <Icon
+          className={cn(
+            "size-4",
+            tone === "income" ? "text-income" : "text-expense",
+          )}
+          aria-hidden
+        />
         {label}
       </p>
       <p
         className={cn(
-          "text-[28px] leading-none font-bold tracking-[-0.02em] tabular-nums",
-          tone === "income" && "text-income",
-          tone === "expense" && "text-expense",
+          "truncate text-[22px] leading-none font-bold tracking-[-0.02em] tabular-nums sm:text-[28px]",
+          tone === "income" ? "text-income" : "text-expense",
         )}
       >
         {value}
       </p>
-    </article>
+      <p className="text-[12px] text-muted-foreground">
+        {count === 0
+          ? "Ningún préstamo activo"
+          : `${count} préstamo${count === 1 ? "" : "s"} activo${count === 1 ? "" : "s"}`}
+      </p>
+    </a>
   );
 }
 
 function LoansSkeleton() {
   return (
     <div
-      className="grid animate-pulse gap-10"
+      className="grid animate-pulse gap-8"
       aria-busy="true"
       aria-label="Cargando préstamos"
     >
       <span className="h-9 w-56 rounded-lg bg-muted" />
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
         <span className="h-[92px] rounded-xl bg-muted" />
         <span className="h-[92px] rounded-xl bg-muted" />
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <span className="h-44 rounded-xl bg-muted" />
-        <span className="h-44 rounded-xl bg-muted" />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <span className="h-32 rounded-xl bg-muted" />
+        <span className="h-32 rounded-xl bg-muted" />
       </div>
     </div>
   );

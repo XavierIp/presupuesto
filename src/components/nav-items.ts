@@ -30,14 +30,17 @@ export const NEW_MOVEMENT: NavItem = {
 
 /** Secciones que en móvil viven dentro de "Más". */
 export const MORE_LINKS = SECTIONS.filter((s) =>
-  ["/tarjetas", "/prestamos", "/ahorro"].includes(s.href),
+  ["/movimientos", "/tarjetas", "/ahorro"].includes(s.href),
 );
 
-// En móvil: 4 destinos y, al centro, el botón para registrar un movimiento.
+const section = (href: string) => SECTIONS.find((s) => s.href === href)!;
+
+// En móvil: 4 destinos y, al centro, el botón para registrar un movimiento
+// (abre Movimientos con el formulario; al cerrarlo quedas en Movimientos).
 export const MOBILE_SECTIONS: (NavItem & { primary?: boolean })[] = [
-  SECTIONS[0],
-  SECTIONS[1],
+  section("/dashboard"),
+  section("/prestamos"),
   { ...NEW_MOVEMENT, primary: true },
-  SECTIONS[2],
+  section("/presupuestos"),
   { href: "/mas", label: "Más", icon: Menu },
 ];
