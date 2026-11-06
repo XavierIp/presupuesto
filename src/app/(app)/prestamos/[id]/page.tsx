@@ -27,6 +27,7 @@ import {
   DeadlineForm,
   DeleteLoanForm,
   HideLoanButton,
+  PassThroughToggle,
   EntryForm,
   PaymentForm,
   RespondLoanForm,
@@ -134,6 +135,9 @@ async function LoanView({
           </h1>
           <p className="text-sm text-muted-foreground">{describeTerms(loan)}</p>
           {loan.note && <p className="text-sm">“{loan.note}”</p>}
+          {isLender && loan.status === "active" && (
+            <PassThroughToggle loanId={loan.id} value={loan.passThrough} />
+          )}
         </div>
         <span
           className={cn(

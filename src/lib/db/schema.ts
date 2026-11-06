@@ -238,6 +238,11 @@ export const loans = pgTable(
       onDelete: "set null",
     }),
     note: text("note"),
+    /**
+     * Los abonos no entran a las cuentas del prestamista: los usa para pagar otra deuda
+     * (p. ej. un préstamo de Yape que tomó para la otra persona). Solo baja lo que le deben.
+     */
+    passThrough: boolean("pass_through").notNull().default(false),
     /** Cada parte puede ocultar de su historial un préstamo ya cerrado. */
     hiddenByLender: boolean("hidden_by_lender").notNull().default(false),
     hiddenByBorrower: boolean("hidden_by_borrower").notNull().default(false),

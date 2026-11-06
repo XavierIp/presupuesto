@@ -33,6 +33,7 @@ import {
   saveEntry,
   savePayment,
   setLoanDeadline,
+  setPassThrough,
 } from "./actions";
 
 function Submit({
@@ -942,16 +943,22 @@ export function DeleteLoanForm({
   return (
     <form action={formAction} className="grid gap-3">
       <input type="hidden" name="loanId" value={loanId} />
-      <p className="text-[15px] font-medium">¿Lo registraste por error o dos veces?</p>
+      <p className="text-[15px] font-medium">
+        ¿Lo registraste por error o dos veces?
+      </p>
       <p className="text-[13px] text-muted-foreground">
-        Bórralo por completo: desaparece {withOther ? "para ambos" : "de tu historial"} y se
-        deshace lo que movió{movements.length > 0 ? ":" : "."}
+        Bórralo por completo: desaparece{" "}
+        {withOther ? "para ambos" : "de tu historial"} y se deshace lo que movió
+        {movements.length > 0 ? ":" : "."}
       </p>
       {movements.length > 0 && (
         <ul className="grid gap-1.5 rounded-lg bg-muted px-3 py-2.5 text-sm">
           {movements.map((m) => (
             <li key={m.id} className="flex items-start gap-2">
-              <X className="mt-0.5 size-3.5 shrink-0 text-expense" aria-hidden />
+              <X
+                className="mt-0.5 size-3.5 shrink-0 text-expense"
+                aria-hidden
+              />
               <span>{describeMovement(m, currency)}</span>
             </li>
           ))}
@@ -992,7 +999,8 @@ export function HideLoanButton({ loanId }: { loanId: string }) {
       onClick={() =>
         startTransition(async () => {
           const result = await hideLoan(loanId);
-          if (!result.ok) return void toast.error(result.error ?? "No se pudo ocultar.");
+          if (!result.ok)
+            return void toast.error(result.error ?? "No se pudo ocultar.");
           toast.success("Quitado de tu historial");
           router.replace("/prestamos");
         })
@@ -1005,5 +1013,44 @@ export function HideLoanButton({ loanId }: { loanId: string }) {
       )}
       Quitar de mi historial
     </Button>
+  );
+}
+
+/** Interruptor: los abonos de este préstamo entran a mis cuentas o solo pasan para pagar otra deuda. */
+export function PassThroughToggle({
+  loanId,
+  value,
+}: {
+  loanId: string;
+  value: boolean;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [on, setOn] = useState(value);
+  return (
+    <label className="mt-1 flex w-fit cursor-pointer items-start gap-2.5 text-sm">
+      <input
+        type="checkbox"
+        checked={on}
+        disabled={pending}
+        onChange={(e) => {
+          const next = e.target.checked;
+          setOn(next);
+          startTransition(async () => {
+            const result = await setPassThrough(loanId, next);
+            if (!result.ok) {
+              setOn(!next);
+              toast.error(result.error ?? "No se pudo guardar.");
+            }
+          });
+        }}
+        className="mt-0.5 size-4 accent-[var(--primary)]"
+      />
+      <span>
+        <span className="font-medium">Los abonos no entran a mis cuentas</span>
+        <span className="block text-[13px] text-muted-foreground">
+          Solo bajan lo que te debe; los usas para pagar otra deuda.
+        </span>
+      </span>
+    </label>
   );
 }

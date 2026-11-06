@@ -937,13 +937,18 @@ export async function savePayment(
     return { ok: true };
   }
 
-  // Préstamo a alguien externo: el prestamista registra el cobro directamente.
-  if (!loan.borrowerId) {
+  // Préstamo a alguien externo (o cuyas cuentas llevo): el prestamista registra el cobro
+  // directamente, sin que la otra persona tenga que confirmarlo.
+  const managed =
+    party.role === "lender" && !me.actor
+      ? await managedBorrower(me.id, loan.borrowerId)
+      : null;
+  if (!loan.borrowerId || managed) {
     const names = await partyNames(loan);
     await db.transaction(async (tx) => {
       const lenderTx = await moveMoney(tx, {
         userId: me.id,
-        accountId: account.id,
+        accountId: loan.passThrough ? null : account.id,
         kind: "loan_in",
         amount: parsed.data.amount,
         description: `Abono de ${names.borrower}`,
@@ -1036,7 +1041,10 @@ export async function respondPayment(
   const borrowerAccountId =
     party.role === "borrower" ? mine.id : payment.accountId;
   const names = await partyNames(loan);
-  const lenderAccount = await stillOwned(loan.lenderId, lenderAccountId);
+  // Si los abonos solo pasan para pagar otra deuda, no entran a las cuentas del prestamista.
+  const lenderAccount = loan.passThrough
+    ? null
+    : await stillOwned(loan.lenderId, lenderAccountId);
   const borrowerAccount = loan.borrowerId
     ? await stillOwned(loan.borrowerId, borrowerAccountId)
     : null;
@@ -1179,7 +1187,7 @@ export async function closeLoan(
     if (paidAll && balance > 0) {
       const lenderTx = await moveMoney(tx, {
         userId: me.id,
-        accountId: "error" in account ? null : account.id,
+        accountId: "error" in account || loan.passThrough ? null : account.id,
         kind: "loan_in",
         amount: balance,
         description: `Abono de ${names.borrower} (cierre)`,
@@ -1293,6 +1301,21 @@ export async function hideLoan(loanId: string): Promise<FormState> {
         : { hiddenByBorrower: true },
     )
     .where(eq(loans.id, loan.id));
+  refresh();
+  return { ok: true };
+}
+
+/** El prestamista indica si los abonos entran a sus cuentas o solo pasan para pagar otra deuda. */
+export async function setPassThrough(
+  loanId: string,
+  passThrough: boolean,
+): Promise<FormState> {
+  const me = await getCurrentUser();
+  const loan = await loanFor(loanId, me.id, "lender");
+  if (!loan) return { ok: false, error: "No encontramos este préstamo." };
+  const conflict = actorConflict(me, loan);
+  if (conflict) return conflict;
+  await db.update(loans).set({ passThrough }).where(eq(loans.id, loan.id));
   refresh();
   return { ok: true };
 }

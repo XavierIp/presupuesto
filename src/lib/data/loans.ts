@@ -130,6 +130,7 @@ function summarize(loan: LoanRow, userId: string, today: string) {
     hidden: role === "lender" ? loan.hiddenByLender : loan.hiddenByBorrower,
     currency: loan.currency,
     note: loan.note,
+    passThrough: loan.passThrough,
     interestRate: loan.interestRate,
     installments: loan.installments,
     firstDueOn: loan.firstDueOn,
@@ -166,6 +167,22 @@ function summarize(loan: LoanRow, userId: string, today: string) {
 }
 
 export type LoanSummary = ReturnType<typeof summarize>;
+
+/**
+ * Nombre corto para la agenda: el comentario del préstamo ("Yape", "Monitor") o
+ * "Cuenta libre Xavier"; sin comentario, "Te paga Denise" / "Préstamo de Xavier".
+ */
+export function loanTitle(
+  loan: Pick<LoanSummary, "type" | "role" | "note" | "counterpart">,
+) {
+  const first = loan.counterpart.split(/\s+/)[0];
+  if (loan.type === "open") return `Cuenta libre ${first}`;
+  const note = loan.note?.split(" · ")[0]?.trim();
+  if (note) return loan.role === "lender" ? `${note} · ${first}` : note;
+  return loan.role === "lender"
+    ? `Te paga ${loan.counterpart}`
+    : `Préstamo de ${loan.counterpart}`;
+}
 
 /** Pantalla de préstamos: lo que presté y lo que me prestaron. */
 export async function getLoansPage() {
@@ -298,10 +315,7 @@ export async function loanAgenda(
     items.push({
       loanId: loan.id,
       role: loan.role,
-      name:
-        loan.role === "lender"
-          ? `Te paga ${loan.counterpart}`
-          : `Préstamo de ${loan.counterpart}`,
+      name: loanTitle(loan),
       detail: due.label,
       dueOn: due.dueOn,
       amount: due.amount,
@@ -338,10 +352,7 @@ export async function loanOverdue(
     const base = {
       loanId: loan.id,
       role: loan.role,
-      name:
-        loan.role === "lender"
-          ? `Te paga ${loan.counterpart}`
-          : `Préstamo de ${loan.counterpart}`,
+      name: loanTitle(loan),
       currency: loan.currency,
       accountId:
         loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId,

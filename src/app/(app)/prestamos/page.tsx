@@ -249,8 +249,13 @@ function LoanCard({ loan }: { loan: LoanSummary }) {
             <div className="min-w-0">
               <p className="truncate font-semibold">{loan.counterpart}</p>
               <p className="truncate text-[13px] text-muted-foreground">
-                {kind}
-                {loan.isExternal && " · no usa la app"}
+                {[
+                  loan.note?.split(" · ")[0],
+                  kind,
+                  loan.isExternal ? "no usa la app" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
             </div>
           </div>
@@ -289,7 +294,10 @@ function LoanCard({ loan }: { loan: LoanSummary }) {
         <div className="flex items-center justify-between gap-3 text-[13px]">
           {loan.status !== "active" ? (
             <span
-              className={cn("rounded-full px-2 py-0.5 font-medium", status.tone)}
+              className={cn(
+                "rounded-full px-2 py-0.5 font-medium",
+                status.tone,
+              )}
             >
               {status.label}
             </span>
