@@ -144,7 +144,7 @@ export async function buildAgenda(
         dueOn: occurrence.dueOn,
         status: statusFor(occurrence.dueOn, today, Boolean(record)),
         paidOn: record?.paidOn ?? null,
-        direction: "out",
+        direction: plan.kind === "income" ? "in" : "out",
       });
     }
   }
@@ -241,7 +241,8 @@ export async function overdueBefore(
   ]);
 
   const items: AgendaItem[] = [];
-  for (const plan of plans) {
+  // Solo pagos: un ingreso que no llegó no es una deuda.
+  for (const plan of plans.filter((p) => p.kind === "expense")) {
     const start = parseDate(plan.startDate);
     const total = totalInstallments(plan);
     for (let k = OVERDUE_LOOKBACK; k >= 1; k--) {

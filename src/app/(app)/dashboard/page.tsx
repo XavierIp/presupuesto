@@ -154,7 +154,7 @@ async function Dashboard({
             tone="income"
             note={
               data.toCollect > 0
-                ? `+ ${formatMoney(data.toCollect, currency)} que te pagan`
+                ? `+ ${formatMoney(data.toCollect, currency)} por recibir`
                 : undefined
             }
           />
@@ -199,7 +199,9 @@ async function Dashboard({
             note={
               data.afterPayments < 0
                 ? "No alcanza para los pagos"
-                : "después de pagar todo"
+                : data.incomeExpected > 0
+                  ? `con ${formatMoney(data.incomeExpected, currency)} que te entran`
+                  : "después de pagar todo"
             }
             noteTone={data.afterPayments < 0 ? "expense" : undefined}
           />

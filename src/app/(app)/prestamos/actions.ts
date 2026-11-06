@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { FormState } from "@/app/(app)/actions";
 import { db } from "@/lib/db";
 import {
+  accountDelegations,
   loanEntries,
   loanPayments,
   loans,
@@ -113,6 +114,28 @@ function actorConflict(
     ok: false,
     error: `Este préstamo es contigo: ${me.name.split(" ")[0]} tiene que gestionarlo desde su propia cuenta.`,
   };
+}
+
+/**
+ * Si yo llevo las cuentas de esa persona (acceso aceptado), lo que le presto se aprueba solo:
+ * sale de mi cuenta y a ella solo le queda la deuda (no le entra dinero a sus cuentas).
+ * Devuelve su nombre, o null si no llevo sus cuentas.
+ */
+async function managedBorrower(managerId: string, ownerId: string | null) {
+  if (!ownerId) return null;
+  const [row] = await db
+    .select({ name: users.name })
+    .from(accountDelegations)
+    .innerJoin(users, eq(users.id, accountDelegations.ownerId))
+    .where(
+      and(
+        eq(accountDelegations.ownerId, ownerId),
+        eq(accountDelegations.managerId, managerId),
+        eq(accountDelegations.status, "accepted"),
+      ),
+    )
+    .limit(1);
+  return row?.name ?? null;
 }
 
 async function loanFor(
@@ -283,6 +306,11 @@ export async function createLoan(
 
   const principal = d.type === "fixed" ? money("el monto").parse(d.amount) : 0;
   const external = d.target === "external";
+  // Externo o alguien cuyas cuentas llevo: queda aprobado de inmediato.
+  const managedName = me.actor
+    ? null
+    : await managedBorrower(me.id, borrowerId);
+  const auto = external || managedName !== null;
 
   await db.transaction(async (tx) => {
     const [loan] = await tx
@@ -294,8 +322,10 @@ export async function createLoan(
         type: d.type,
         principal,
         currency: me.currency,
-        // A otro usuario: queda pendiente hasta que acepte. A alguien externo: activo de inmediato.
-        status: external ? "active" : "pending",
+        // A otro usuario: queda pendiente hasta que acepte. A alguien externo (o cuyas
+        // cuentas llevo): activo de inmediato.
+        status: auto ? "active" : "pending",
+        respondedAt: managedName ? new Date() : null,
         lentOn: todayIn(),
         interestRate: d.interest ? percentToBasisPoints(d.interest) : 0,
         installments: d.type === "fixed" ? Number(d.installments) : null,
@@ -313,14 +343,14 @@ export async function createLoan(
       .returning({ id: loans.id });
 
     if (d.type === "fixed") {
-      const lenderTx = external
+      const lenderTx = auto
         ? await lenderOut(tx, {
             loan: { id: loan.id, lenderId: me.id },
             accountId: funding.id,
             amount: principal,
             installments: funding.installments,
             installmentAmount: funding.installmentAmount,
-            borrowerName: d.borrowerName ?? "otra persona",
+            borrowerName: managedName ?? d.borrowerName ?? "otra persona",
           })
         : null;
       await tx.insert(loanEntries).values({
@@ -331,8 +361,8 @@ export async function createLoan(
         installments: funding.installments,
         installmentAmount: funding.installmentAmount,
         paidWithCard: funding.paidWithCard,
-        status: external ? "accepted" : "pending",
-        disbursedOn: external ? todayIn() : null,
+        status: auto ? "accepted" : "pending",
+        disbursedOn: auto ? todayIn() : null,
         lenderTransactionId: lenderTx,
       });
     }
@@ -700,16 +730,36 @@ export async function saveEntry(
   } else {
     const overLimit = await checkLimit(party.loan, parsed.data.amount);
     if (overLimit) return { ok: false, fieldErrors: { amount: overLimit } };
-    await db.insert(loanEntries).values({
-      loanId: party.loan.id,
-      amount: parsed.data.amount,
-      note: parsed.data.note || null,
-      requestedBy: me.id,
-      accountId: account.id,
-      installments: account.installments,
-      installmentAmount: account.installmentAmount,
-      paidWithCard: account.paidWithCard,
-      status: "pending",
+    const managedName =
+      party.role === "lender" && !me.actor
+        ? await managedBorrower(me.id, party.loan.borrowerId)
+        : null;
+    await db.transaction(async (tx) => {
+      // Si llevo sus cuentas, la entrega queda aceptada: sale de mi cuenta y solo suma a su deuda.
+      const lenderTx = managedName
+        ? await lenderOut(tx, {
+            loan: party.loan,
+            accountId: account.id,
+            amount: parsed.data.amount,
+            installments: account.installments,
+            installmentAmount: account.installmentAmount,
+            borrowerName: managedName,
+          })
+        : null;
+      await tx.insert(loanEntries).values({
+        loanId: party.loan.id,
+        amount: parsed.data.amount,
+        note: parsed.data.note || null,
+        requestedBy: me.id,
+        accountId: account.id,
+        installments: account.installments,
+        installmentAmount: account.installmentAmount,
+        paidWithCard: account.paidWithCard,
+        status: managedName ? "accepted" : "pending",
+        disbursedOn: managedName ? todayIn() : null,
+        respondedAt: managedName ? new Date() : null,
+        lenderTransactionId: lenderTx,
+      });
     });
   }
   refresh();

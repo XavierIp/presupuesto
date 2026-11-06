@@ -85,6 +85,13 @@
       "when": 1793979324238,
       "tag": "0011_black_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793982330379,
+      "tag": "0012_luxuriant_jackal",
+      "breakpoints": true
     }
   ]
 }

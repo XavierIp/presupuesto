@@ -25,11 +25,14 @@ const FREQUENCIES: { value: Frequency; label: string }[] = [
 ];
 
 export function PlanForm({
+  kind = "expense",
   currency,
   categories,
   sources,
   today,
 }: {
+  /** `income`: ingreso fijo (sueldo…). Sin categoría y entra a una cuenta. */
+  kind?: "expense" | "income";
   currency: string;
   categories: { id: string; name: string }[];
   sources: PaymentSource[];
@@ -37,8 +40,9 @@ export function PlanForm({
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
     createPlan,
-    "Pago programado creado",
+    kind === "income" ? "Ingreso fijo creado" : "Pago programado creado",
   );
+  const income = kind === "income";
   const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [duration, setDuration] = useState<"installments" | "indefinite">(
     "installments",
@@ -71,17 +75,22 @@ export function PlanForm({
         setInstallments("");
       }}
     >
+      <input type="hidden" name="kind" value={kind} />
       <Field
         label="Nombre"
         name="name"
-        placeholder="Cuota del auto, plan de teléfono…"
+        placeholder={
+          income
+            ? "Sueldo, pensión, alquiler que cobras…"
+            : "Cuota del auto, plan de teléfono…"
+        }
         autoComplete="off"
         maxLength={60}
         error={errors.name}
       />
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className={income ? "grid gap-4" : "grid gap-4 sm:grid-cols-2"}>
         <Field
-          label={`Monto de cada pago (${currencySymbol(currency)})`}
+          label={`Monto de cada ${income ? "ingreso" : "pago"} (${currencySymbol(currency)})`}
           name="amount"
           inputMode="decimal"
           autoComplete="off"
@@ -90,31 +99,40 @@ export function PlanForm({
           onChange={(e) => setAmount(e.target.value)}
           error={errors.amount}
         />
-        <SelectField label="Categoría" name="categoryId" defaultValue="">
-          <option value="">Sin categoría</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </SelectField>
+        {!income && (
+          <SelectField label="Categoría" name="categoryId" defaultValue="">
+            <option value="">Sin categoría</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </SelectField>
+        )}
       </div>
 
       {sources.length > 0 && (
         <AccountSelect
-          label="Cuenta o tarjeta habitual"
+          label={income ? "¿A qué cuenta entra?" : "Cuenta o tarjeta habitual"}
           name="accountId"
           sources={sources}
           currency={currency}
-          noneLabel="Elegir al momento de pagar"
-          hint="Se sugerirá al pagar; siempre puedes cambiarla."
+          excludeTypes={income ? ["credit"] : undefined}
+          noneLabel={
+            income ? "Elegir al registrarlo" : "Elegir al momento de pagar"
+          }
+          hint={
+            income
+              ? "Se sugerirá al registrarlo; siempre puedes cambiarla."
+              : "Se sugerirá al pagar; siempre puedes cambiarla."
+          }
           error={errors.accountId}
         />
       )}
 
       <fieldset className="grid gap-1.5">
         <legend className="mb-1.5 text-sm font-medium">
-          ¿Cada cuánto se paga?
+          {income ? "¿Cada cuánto te pagan?" : "¿Cada cuánto se paga?"}
         </legend>
         <Segmented
           name="frequency"
@@ -194,7 +212,7 @@ export function PlanForm({
 
       <Button type="submit" size="lg" disabled={pending}>
         {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-        Guardar pago programado
+        {income ? "Guardar ingreso fijo" : "Guardar pago programado"}
       </Button>
     </form>
   );

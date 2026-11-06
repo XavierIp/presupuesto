@@ -1,0 +1,1 @@
+ALTER TABLE "recurring_payments" ADD COLUMN "kind" "category_kind" DEFAULT 'expense' NOT NULL;

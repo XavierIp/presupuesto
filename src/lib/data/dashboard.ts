@@ -117,6 +117,11 @@ export async function getDashboard(monthParam?: string) {
   const pendingItems = outgoing.filter(
     (i) => i.status !== "paid" && i.status !== "clear",
   );
+  const incomeExpected = mine
+    .filter(
+      (i) => i.kind === "plan" && i.direction === "in" && i.status !== "paid",
+    )
+    .reduce((sum, i) => sum + i.amount, 0);
   const toCollect = mine
     .filter((i) => i.direction === "in" && i.status !== "paid")
     .reduce((sum, i) => sum + i.amount, 0);
@@ -156,7 +161,10 @@ export async function getDashboard(monthParam?: string) {
     markers: agendaData.markers,
     loanActions,
     /** Lo que quedaría después de pagar todo lo pendiente del mes. */
-    afterPayments: available - pending,
+    /** Ingresos fijos del mes que aún no registras (sueldo…). */
+    incomeExpected,
+    /** Lo que quedaría tras pagar todo lo pendiente, sumando los ingresos fijos que faltan. */
+    afterPayments: available + incomeExpected - pending,
     income: monthTotals.find((t) => t.kind === "income")?.total ?? 0,
     expense: monthTotals.find((t) => t.kind === "expense")?.total ?? 0,
     monthMovements,

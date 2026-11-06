@@ -161,10 +161,12 @@ export const recurringPayments = pgTable(
     id: id(),
     userId: userRef(),
     name: text("name").notNull(),
+    /** `expense`: pago programado. `income`: ingreso fijo (sueldo, pensión…). */
+    kind: categoryKind("kind").notNull().default("expense"),
     amount: cents("amount").notNull(),
     currency: text("currency").notNull(),
     categoryId: text("category_id").references(() => categories.id, { onDelete: "set null" }),
-    /** Cuenta de donde sale el pago. Si es nula se usa la cuenta principal. */
+    /** Cuenta de donde sale el pago (o a donde entra el ingreso). Si es nula se usa la principal. */
     accountId: text("account_id").references(() => financialAccounts.id, { onDelete: "set null" }),
     frequency: paymentFrequency("frequency").notNull(),
     /** Fecha del primer pago. */

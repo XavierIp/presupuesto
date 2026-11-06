@@ -105,9 +105,13 @@ export async function getBudgetPage(monthParam?: string) {
 
   const budgeted = budgetRows.reduce((sum, b) => sum + b.amount, 0);
   const budgetSpent = budgetRows.reduce((sum, b) => sum + b.spent, 0);
-  const fixedThisMonth = plans
-    .filter((p) => p.currency === user.currency)
-    .reduce((sum, p) => sum + p.amount * occurrencesInMonth(p, ym).length, 0);
+  // Balance del mes: ingresos fijos menos pagos fijos (en la moneda principal).
+  const monthTotal = (kind: "income" | "expense") =>
+    plans
+      .filter((p) => p.kind === kind && p.currency === user.currency)
+      .reduce((sum, p) => sum + p.amount * occurrencesInMonth(p, ym).length, 0);
+  const fixedThisMonth = monthTotal("expense");
+  const incomeThisMonth = monthTotal("income");
 
   return {
     user,
@@ -121,13 +125,17 @@ export async function getBudgetPage(monthParam?: string) {
     budgetSpent,
     expense: expenseRow[0]?.total ?? 0,
     fixedThisMonth,
-    fixedCount: plans.reduce((n, p) => n + occurrencesInMonth(p, ym).length, 0),
+    incomeThisMonth,
+    fixedCount: plans
+      .filter((p) => p.kind === "expense")
+      .reduce((n, p) => n + occurrencesInMonth(p, ym).length, 0),
     budgets: budgetRows,
     expenseCategories,
     sources: toPaymentSources(accounts),
     plans: plans.map((plan) => ({
       id: plan.id,
       name: plan.name,
+      kind: plan.kind,
       amount: plan.amount,
       currency: plan.currency,
       category: plan.category?.name ?? null,

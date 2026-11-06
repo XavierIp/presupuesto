@@ -54,6 +54,7 @@ const planSchema = z
     amount: money("el monto"),
     categoryId: z.string().optional(),
     accountId: z.string().optional(),
+    kind: z.enum(["expense", "income"]),
     frequency: z.enum(["monthly", "semimonthly", "yearly", "once"]),
     startDate: isoDate,
     duration: z.enum(["installments", "indefinite"]),
@@ -86,6 +87,7 @@ export async function createPlan(
     amount: formData.get("amount") ?? "",
     categoryId: formData.get("categoryId") || undefined,
     accountId: formData.get("accountId") || undefined,
+    kind: formData.get("kind") === "income" ? "income" : "expense",
     frequency: formData.get("frequency"),
     startDate: formData.get("startDate") ?? "",
     duration: formData.get("duration") ?? "indefinite",
@@ -105,9 +107,13 @@ export async function createPlan(
     accountId: account?.id ?? null,
     userId: user.id,
     name: plan.name,
+    kind: plan.kind,
     amount: plan.amount,
     currency: user.currency,
-    categoryId: await ownCategory(user.id, plan.categoryId ?? null),
+    categoryId:
+      plan.kind === "income"
+        ? null
+        : await ownCategory(user.id, plan.categoryId ?? null),
     frequency: plan.frequency,
     startDate: plan.startDate,
     dayOfMonth:
@@ -168,8 +174,20 @@ export async function payInstallment(
     user.id,
     String(formData.get("accountId") ?? ""),
   );
-  if (!account || account.currency !== plan.currency) {
-    return { ok: false, fieldErrors: { accountId: "Elige con qué pagas." } };
+  const income = plan.kind === "income";
+  if (
+    !account ||
+    account.currency !== plan.currency ||
+    (income && account.type === "credit")
+  ) {
+    return {
+      ok: false,
+      fieldErrors: {
+        accountId: income
+          ? "Elige a qué cuenta entra (no una tarjeta de crédito)."
+          : "Elige con qué pagas.",
+      },
+    };
   }
   const accountId = account.id;
 
@@ -188,7 +206,7 @@ export async function payInstallment(
           userId: user.id,
           accountId,
           categoryId: plan.categoryId,
-          kind: "expense",
+          kind: income ? "income" : "expense",
           amount: plan.amount,
           description,
           occurredOn: today,

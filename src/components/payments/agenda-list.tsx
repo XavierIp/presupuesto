@@ -22,7 +22,8 @@ const STATUS_STYLES: Record<PaymentStatus, string> = {
 function statusLabel(item: AgendaItem, today: string) {
   if (item.status === "clear") return "Nada que pagar";
   if (item.status === "paid") {
-    if (item.direction === "in") return "Cobrado";
+    if (item.direction === "in")
+      return item.kind === "plan" ? "Recibido" : "Cobrado";
     return item.paidOn
       ? `Pagado el ${formatDate(item.paidOn, { withYear: false })}`
       : "Pagado";
@@ -193,11 +194,15 @@ export function PaymentAction({
   const trigger = {
     variant: "secondary" as const,
     className: "h-10 px-3",
-    ariaLabel: `${incoming ? "Registrar cobro de" : "Pagar"} ${item.name}`,
+    ariaLabel: `${incoming ? "Registrar" : "Pagar"} ${item.name}`,
     label: (
       <>
         <Check className="size-4" aria-hidden />
-        {incoming ? "Registrar cobro" : "Pagar"}
+        {incoming
+          ? item.kind === "plan"
+            ? "Registrar ingreso"
+            : "Registrar cobro"
+          : "Pagar"}
       </>
     ),
   };
@@ -243,11 +248,12 @@ export function PaymentAction({
 
   return (
     <Modal
-      title={`Pagar ${item.name}`}
+      title={incoming ? `Registrar ${item.name}` : `Pagar ${item.name}`}
       description={`${item.detail ?? ""} · ${formatMoney(item.amount, item.currency)}`}
       trigger={trigger}
     >
       <PayForm
+        income={incoming}
         planId={item.planId}
         installment={item.installment}
         monthKey={monthKey}

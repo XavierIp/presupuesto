@@ -15,7 +15,10 @@ export function PayForm({
   currency,
   sources,
   defaultAccountId,
+  income = false,
 }: {
+  /** Ingreso fijo: se registra la entrada en una cuenta (no tarjeta de crédito). */
+  income?: boolean;
   planId: string;
   installment: number;
   monthKey: string;
@@ -25,7 +28,7 @@ export function PayForm({
 }) {
   const { state, formAction, pending, formRef } = useModalFormAction(
     payInstallment,
-    "Pago registrado",
+    income ? "Ingreso registrado" : "Pago registrado",
   );
 
   if (!sources.some((s) => s.currency === currency)) {
@@ -49,17 +52,22 @@ export function PayForm({
       <input type="hidden" name="month" value={monthKey} />
       <input type="hidden" name="installment" value={installment} />
       <AccountSelect
-        label="¿Con qué pagas?"
+        label={income ? "¿A qué cuenta entró?" : "¿Con qué pagas?"}
         name="accountId"
         sources={sources}
         currency={currency}
+        excludeTypes={income ? ["credit"] : undefined}
         defaultValue={defaultAccountId}
-        hint="Con tarjeta de crédito el pago aumenta su deuda; con una cuenta, baja su saldo."
+        hint={
+          income
+            ? "Se suma al saldo de esa cuenta."
+            : "Con tarjeta de crédito el pago aumenta su deuda; con una cuenta, baja su saldo."
+        }
         error={state.fieldErrors?.accountId}
       />
       <Button type="submit" size="lg" disabled={pending}>
         {pending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-        Confirmar pago
+        {income ? "Registrar ingreso" : "Confirmar pago"}
       </Button>
     </form>
   );

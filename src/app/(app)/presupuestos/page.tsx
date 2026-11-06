@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import {
+  ArrowDownLeft,
+  ArrowUpRight,
   CalendarClock,
+  Banknote,
   ChevronLeft,
   ChevronRight,
   PencilLine,
@@ -92,6 +95,27 @@ async function BudgetView({
             />
           </Modal>
           <Modal
+            title="Nuevo ingreso fijo"
+            description="Tu sueldo u otro ingreso que llega siempre el mismo día."
+            trigger={{
+              variant: "secondary",
+              label: (
+                <>
+                  <Plus className="size-4" aria-hidden />
+                  Ingreso fijo
+                </>
+              ),
+            }}
+          >
+            <PlanForm
+              kind="income"
+              currency={currency}
+              categories={[]}
+              sources={data.sources}
+              today={data.today}
+            />
+          </Modal>
+          <Modal
             title="Nuevo pago programado"
             description="Cuotas, suscripciones, servicios o un pago único."
             trigger={{
@@ -113,10 +137,69 @@ async function BudgetView({
         </div>
       </header>
 
+      <Balance data={data} />
       <Summary data={data} />
       <CategoryBudgets data={data} />
       <Plans data={data} />
     </div>
+  );
+}
+
+/* ───────────── Balance: ingresos fijos − pagos fijos ───────────── */
+
+function Balance({ data }: { data: BudgetPageData }) {
+  const { currency } = data.user;
+  const balance = data.incomeThisMonth - data.fixedThisMonth;
+  return (
+    <section
+      aria-labelledby="balance-title"
+      className="grid gap-4 rounded-xl border bg-card p-4 sm:p-5"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="balance-title" className="font-semibold">
+          Balance del mes
+        </h2>
+        <p className="text-[13px] text-muted-foreground">
+          Ingresos fijos − pagos fijos
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-1 rounded-lg bg-income/5 p-3">
+          <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+            <ArrowDownLeft className="size-4 text-income" aria-hidden />
+            Te entra
+          </p>
+          <p className="truncate text-[20px] font-bold tracking-[-0.02em] text-income tabular-nums sm:text-[24px]">
+            {formatMoney(data.incomeThisMonth, currency)}
+          </p>
+        </div>
+        <div className="grid gap-1 rounded-lg bg-expense/5 p-3">
+          <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+            <ArrowUpRight className="size-4 text-expense" aria-hidden />
+            Pagas
+          </p>
+          <p className="truncate text-[20px] font-bold tracking-[-0.02em] text-expense tabular-nums sm:text-[24px]">
+            {formatMoney(data.fixedThisMonth, currency)}
+          </p>
+        </div>
+      </div>
+      <p
+        className={cn(
+          "flex items-center justify-between gap-3 border-t pt-3 font-semibold",
+          balance < 0 && "text-expense",
+        )}
+      >
+        <span>{balance < 0 ? "Te falta" : "Te sobra"}</span>
+        <span className="text-[22px] tracking-[-0.01em] tabular-nums">
+          {formatMoney(Math.abs(balance), currency)}
+        </span>
+      </p>
+      {data.incomeThisMonth === 0 && (
+        <p className="-mt-2 text-[13px] text-muted-foreground">
+          Agrega tu sueldo con «Ingreso fijo» para ver cuánto te sobra cada mes.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -302,10 +385,26 @@ function CategoryBudgets({ data }: { data: BudgetPageData }) {
 /* ───────────── Pagos programados ───────────── */
 
 function Plans({ data }: { data: BudgetPageData }) {
+  const incomes = data.plans.filter((p) => p.kind === "income");
+  const payments = data.plans.filter((p) => p.kind === "expense");
+  return (
+    <>
+      {incomes.length > 0 && (
+        <section className="grid gap-4">
+          <SectionTitle icon={Banknote} title="Mis ingresos fijos" />
+          <PlanList plans={incomes} />
+        </section>
+      )}
+      <Payments plans={payments} />
+    </>
+  );
+}
+
+function Payments({ plans }: { plans: BudgetPageData["plans"] }) {
   return (
     <section className="grid gap-4">
       <SectionTitle icon={Repeat} title="Mis pagos programados" />
-      {data.plans.length === 0 ? (
+      {plans.length === 0 ? (
         <Empty>
           Agrega tu cuota del auto, tu plan de teléfono o cualquier pago fijo
           con{" "}
@@ -315,16 +414,17 @@ function Plans({ data }: { data: BudgetPageData }) {
           . Los verás en el calendario de Inicio.
         </Empty>
       ) : (
-        <PlanList data={data} />
+        <PlanList plans={plans} />
       )}
     </section>
   );
 }
 
-function PlanList({ data }: { data: BudgetPageData }) {
+function PlanList({ plans }: { plans: BudgetPageData["plans"] }) {
   return (
     <ul className="grid gap-3 sm:grid-cols-2">
-      {data.plans.map((plan) => {
+      {plans.map((plan) => {
+        const income = plan.kind === "income";
         const ratio = plan.totalInstallments
           ? plan.paidCount / plan.totalInstallments
           : null;
@@ -343,14 +443,21 @@ function PlanList({ data }: { data: BudgetPageData }) {
               </div>
               <DeleteButton kind="plan" id={plan.id} name={plan.name} />
             </div>
-            <p className="text-[22px] font-semibold tracking-[-0.01em] tabular-nums">
+            <p
+              className={cn(
+                "text-[22px] font-semibold tracking-[-0.01em] tabular-nums",
+                income && "text-income",
+              )}
+            >
+              {income && "+"}
               {formatMoney(plan.amount, plan.currency)}
             </p>
             {ratio !== null ? (
               <div className="grid gap-1.5">
                 <div className="flex justify-between text-[13px] text-muted-foreground tabular-nums">
                   <span>
-                    {plan.paidCount} de {plan.totalInstallments} pagadas
+                    {plan.paidCount} de {plan.totalInstallments}{" "}
+                    {income ? "recibidos" : "pagadas"}
                   </span>
                   {plan.lastDueDate && (
                     <span>Termina {formatDate(plan.lastDueDate)}</span>
@@ -373,7 +480,13 @@ function PlanList({ data }: { data: BudgetPageData }) {
             ) : (
               <p className="text-[13px] text-muted-foreground">
                 Sin fecha de fin · {plan.paidCount}{" "}
-                {plan.paidCount === 1 ? "pago" : "pagos"} hechos
+                {income
+                  ? plan.paidCount === 1
+                    ? "ingreso registrado"
+                    : "ingresos registrados"
+                  : plan.paidCount === 1
+                    ? "pago hecho"
+                    : "pagos hechos"}
               </p>
             )}
           </li>
