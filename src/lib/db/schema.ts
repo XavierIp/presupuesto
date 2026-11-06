@@ -411,6 +411,28 @@ export const recurringPaymentRecordsRelations = relations(recurringPaymentRecord
   }),
 }));
 
+/**
+ * Acceso compartido: `managerId` lleva las cuentas de `ownerId`.
+ * Lo pide quien las va a llevar; la dueña lo acepta y puede quitarlo cuando quiera.
+ */
+export const accountDelegations = pgTable(
+  "account_delegations",
+  {
+    id: id(),
+    ownerId: userRef("owner_id"),
+    managerId: userRef("manager_id"),
+    /** `pending`: esperando a la dueña. `accepted`: activo. `rejected`: rechazado o quitado. */
+    status: requestStatus("status").notNull().default("pending"),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("account_delegations_pair_idx").on(t.ownerId, t.managerId),
+    index("account_delegations_manager_idx").on(t.managerId),
+  ],
+);
+
 export const loanEntriesRelations = relations(loanEntries, ({ one }) => ({
   loan: one(loans, { fields: [loanEntries.loanId], references: [loans.id] }),
 }));

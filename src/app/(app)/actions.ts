@@ -8,13 +8,13 @@ import { db } from "@/lib/db";
 import { user as userTable } from "@/lib/db/schema";
 import { DNI_SCHEMA } from "@/lib/dni";
 import { createResetToken, isAdmin, issueRecoveryCode } from "@/lib/recovery";
-import { getCurrentUser } from "@/lib/session";
+import { getSessionUser } from "@/lib/session";
 
 export type FormState = { ok: boolean; error?: string; fieldErrors?: Record<string, string> };
 
 /** Para cuentas creadas antes de exigir el DNI. */
 export async function completeDni(_prev: FormState, formData: FormData): Promise<FormState> {
-  const user = await getCurrentUser();
+  const user = await getSessionUser();
   if (user.dni) return { ok: true };
 
   const parsed = DNI_SCHEMA.safeParse(String(formData.get("dni") ?? "").trim());
@@ -37,7 +37,7 @@ export async function completeDni(_prev: FormState, formData: FormData): Promise
 
 /** Crea (o renueva) el código de recuperación del usuario y lo devuelve una sola vez. */
 export async function createMyRecoveryCode(): Promise<{ code: string }> {
-  const user = await getCurrentUser();
+  const user = await getSessionUser();
   // Sin refresh(): el aviso que lo muestra debe seguir visible hasta que el usuario lo guarde.
   return { code: await issueRecoveryCode(user.id) };
 }
@@ -52,7 +52,7 @@ export async function createResetLink(
   _prev: ResetLinkState,
   formData: FormData,
 ): Promise<ResetLinkState> {
-  const me = await getCurrentUser();
+  const me = await getSessionUser();
   if (!isAdmin(me.email)) return { ok: false, error: "Solo un administrador puede hacer esto." };
 
   const query = String(formData.get("who") ?? "").trim().toLowerCase();

@@ -1,10 +1,12 @@
 import { IdCard } from "lucide-react";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, getSessionUser } from "@/lib/session";
 import { DniForm } from "./dni-form";
 
 /** Aviso para cuentas sin DNI. No muestra nada si el usuario ya lo tiene. */
 export async function DniPrompt() {
-  const user = await getCurrentUser();
+  // Mientras llevas las cuentas de otra persona no se muestran avisos de tu propia cuenta.
+  if ((await getCurrentUser()).actor) return null;
+  const user = await getSessionUser();
   if (user.dni) return null;
 
   return (

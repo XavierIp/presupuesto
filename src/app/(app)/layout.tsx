@@ -1,8 +1,18 @@
 import { Suspense } from "react";
-import { BottomNav, BottomNavFallback, SidebarNav, SidebarNavFallback } from "@/components/app-nav";
+import {
+  BottomNav,
+  BottomNavFallback,
+  SidebarNav,
+  SidebarNavFallback,
+} from "@/components/app-nav";
 import { Brand } from "@/components/brand";
 import { DniPrompt } from "@/components/dni-prompt";
 import { RecoveryPrompt } from "@/components/recovery-prompt";
+import {
+  AccountSwitcherSlot,
+  ActingBanner,
+  SharingPrompt,
+} from "@/components/sharing/sharing";
 import { LiveSync } from "@/components/live-sync";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { UserMenu, UserMenuSkeleton } from "@/components/user-menu";
@@ -16,6 +26,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <Brand href="/dashboard" />
           <ThemeToggle />
         </div>
+        <Suspense fallback={null}>
+          <AccountSwitcherSlot className="w-full" />
+        </Suspense>
         <Suspense fallback={<SidebarNavFallback />}>
           <SidebarNav />
         </Suspense>
@@ -29,14 +42,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-background/95 px-4 py-2 backdrop-blur-sm lg:hidden">
           <Brand href="/dashboard" />
-          <ThemeToggle />
+          <div className="flex min-w-0 items-center gap-1">
+            <Suspense fallback={null}>
+              <AccountSwitcherSlot className="max-w-[11.5rem]" />
+            </Suspense>
+            <ThemeToggle />
+          </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-6 lg:px-10 lg:pt-10 lg:pb-12">
+          <Suspense fallback={null}>
+            <ActingBanner />
+          </Suspense>
           <Suspense fallback={null}>
             <DniPrompt />
           </Suspense>
           <Suspense fallback={null}>
             <RecoveryPrompt />
+          </Suspense>
+          <Suspense fallback={null}>
+            <SharingPrompt />
           </Suspense>
           {children}
         </main>

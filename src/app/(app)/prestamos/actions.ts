@@ -21,7 +21,7 @@ import {
   totalOwed,
 } from "@/lib/loans";
 import { todayIn } from "@/lib/schedule";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, type CurrentUser } from "@/lib/session";
 import { fieldErrors, isoDate, money } from "@/lib/validation";
 
 // Cada acción vuelve a leer la sesión y comprueba que el usuario sea la parte correcta del préstamo.
@@ -96,6 +96,23 @@ async function cashAccount(
     };
   }
   return { id: account.id as string | null };
+}
+
+/**
+ * Si llevo las cuentas de otra persona, no puedo tocar sus préstamos conmigo:
+ * eso lo decide ella desde su propia cuenta (nadie se aprueba a sí mismo).
+ */
+function actorConflict(
+  me: CurrentUser,
+  loan: { lenderId: string; borrowerId: string | null },
+): FormState | null {
+  if (!me.actor) return null;
+  if (loan.lenderId !== me.actor.id && loan.borrowerId !== me.actor.id)
+    return null;
+  return {
+    ok: false,
+    error: `Este préstamo es contigo: ${me.name.split(" ")[0]} tiene que gestionarlo desde su propia cuenta.`,
+  };
 }
 
 async function loanFor(
@@ -231,6 +248,13 @@ export async function createLoan(
         ok: false,
         fieldErrors: { dni: "No puedes prestarte a ti mismo." },
       };
+    if (found.id === me.actor?.id)
+      return {
+        ok: false,
+        fieldErrors: {
+          dni: "Estás llevando sus cuentas: no puedes registrar un préstamo contigo mismo.",
+        },
+      };
     borrowerId = found.id;
   }
 
@@ -324,6 +348,8 @@ export async function cancelLoan(loanId: string): Promise<FormState> {
   const loan = await loanFor(loanId, me.id, "lender");
   if (!loan || loan.status !== "pending")
     return { ok: false, error: "Solo puedes cancelar préstamos sin aceptar." };
+  const conflict = actorConflict(me, loan);
+  if (conflict) return conflict;
   await db
     .update(loans)
     .set({ status: "cancelled", respondedAt: new Date() })
@@ -343,6 +369,8 @@ export async function respondLoan(
   const loan = await loanFor(String(formData.get("loanId")), me.id, "borrower");
   if (!loan || loan.status !== "pending")
     return { ok: false, error: "Este préstamo ya no está pendiente." };
+  const conflict = actorConflict(me, loan);
+  if (conflict) return conflict;
 
   if (formData.get("decision") !== "accept") {
     await db
@@ -603,6 +631,8 @@ export async function saveEntry(
   if (!party || party.loan.type !== "open" || party.loan.status !== "active") {
     return { ok: false, error: "Esta cuenta libre no está activa." };
   }
+  const conflict = actorConflict(me, party.loan);
+  if (conflict) return conflict;
   const parsed = amountNote.safeParse({
     amount: formData.get("amount") ?? "",
     note: formData.get("note") ?? "",
@@ -718,6 +748,8 @@ export async function respondEntry(
   if (!entry || !party || entry.requestedBy === me.id) {
     return { ok: false, error: "No puedes responder esto." };
   }
+  const conflict = actorConflict(me, party.loan);
+  if (conflict) return conflict;
   if (entry.status !== "pending")
     return { ok: false, error: "Ya fue respondido." };
 
@@ -815,6 +847,8 @@ export async function savePayment(
   if (!party || party.loan.status !== "active") {
     return { ok: false, error: "Este préstamo no está activo." };
   }
+  const conflict = actorConflict(me, party.loan);
+  if (conflict) return conflict;
   const parsed = amountNote.safeParse({
     amount: formData.get("amount") ?? "",
     note: formData.get("note") ?? "",
@@ -926,6 +960,8 @@ export async function respondPayment(
   if (!payment || !party || payment.createdBy === me.id) {
     return { ok: false, error: "No puedes responder esto." };
   }
+  const conflict = actorConflict(me, party.loan);
+  if (conflict) return conflict;
   if (payment.status !== "pending")
     return { ok: false, error: "Ya fue respondido." };
 
@@ -1033,6 +1069,8 @@ export async function closeLoan(
   const loan = await loanFor(String(formData.get("loanId")), me.id, "lender");
   if (!loan || loan.status !== "active")
     return { ok: false, error: "Este préstamo no está activo." };
+  const conflict = actorConflict(me, loan);
+  if (conflict) return conflict;
 
   const paidAll = formData.get("decision") === "paid";
   const account = await cashAccount(
@@ -1137,6 +1175,8 @@ export async function setLoanDeadline(
   if (!loan || loan.type !== "open" || loan.status !== "active") {
     return { ok: false, error: "Esta cuenta libre no está activa." };
   }
+  const conflict = actorConflict(me, loan);
+  if (conflict) return conflict;
   const raw = String(formData.get("dueOn") ?? "").trim();
   if (raw && !isoDate.safeParse(raw).success) {
     return { ok: false, fieldErrors: { dueOn: "Elige una fecha válida." } };
@@ -1170,6 +1210,8 @@ export async function deleteLoan(
   const me = await getCurrentUser();
   const loan = await loanFor(String(formData.get("loanId")), me.id, "lender");
   if (!loan) return { ok: false, error: "No encontramos este préstamo." };
+  const conflict = actorConflict(me, loan);
+  if (conflict) return conflict;
   await db.transaction(async (tx) => {
     await tx.delete(transactions).where(eq(transactions.loanId, loan.id));
     await tx.delete(loans).where(eq(loans.id, loan.id));

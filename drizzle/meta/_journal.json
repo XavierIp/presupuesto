@@ -78,6 +78,13 @@
       "when": 1792597990491,
       "tag": "0010_hard_tiger_shark",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793979324238,
+      "tag": "0011_black_ikaris",
+      "breakpoints": true
     }
   ]
 }

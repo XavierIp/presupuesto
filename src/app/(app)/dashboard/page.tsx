@@ -53,7 +53,9 @@ async function Dashboard({
         >
           <div className="grid w-full gap-3">
             <p className="text-[12px] font-medium tracking-[0.06em] text-muted-foreground uppercase">
-              Hola, {firstName}
+              {data.user.actor
+                ? `Cuentas de ${firstName}`
+                : `Hola, ${firstName}`}
             </p>
             {data.mainAccount && (
               <MainAccountCard

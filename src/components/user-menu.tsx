@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { Settings } from "lucide-react";
-import { getCurrentUser } from "@/lib/session";
+import { getSessionUser } from "@/lib/session";
 import { SignOutButton } from "./sign-out-button";
 
 export async function UserMenu() {
-  const user = await getCurrentUser();
+  const user = await getSessionUser();
   const initials = user.name
     .split(/\s+/)
     .slice(0, 2)

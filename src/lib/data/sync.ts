@@ -5,9 +5,10 @@ import { db } from "@/lib/db";
 /**
  * Huella de todo lo que el usuario ve: si cambia, la pantalla debe refrescarse.
  * Es una sola consulta de agregados (barata), pensada para consultarse cada pocos segundos.
- * Incluye lo que hacen otras personas en sus préstamos compartidos.
+ * Incluye lo que hacen otras personas en sus préstamos compartidos y en el acceso compartido
+ * (`sessionUserId`: quien inició sesión, si está llevando las cuentas de `userId`).
  */
-export async function syncVersion(userId: string) {
+export async function syncVersion(userId: string, sessionUserId = userId) {
   const { rows } = await db.execute<{ version: string; pending: number }>(sql`
     with my_loans as (
       select id, status, lender_id, borrower_id, updated_at
@@ -28,7 +29,9 @@ export async function syncVersion(userId: string) {
            from recurring_payments where user_id = ${userId}),
         (select count(*) from recurring_payment_records r
            join recurring_payments p on p.id = r.recurring_payment_id where p.user_id = ${userId}),
-        (select count(*) || ':' || coalesce(sum(amount), 0) from budgets where user_id = ${userId})
+        (select count(*) || ':' || coalesce(sum(amount), 0) from budgets where user_id = ${userId}),
+        (select count(*) || ':' || coalesce(max(updated_at)::text, '') from account_delegations
+           where owner_id in (${userId}, ${sessionUserId}) or manager_id in (${userId}, ${sessionUserId}))
       ) as version,
       (
         (select count(*) from my_loans where borrower_id = ${userId} and status = 'pending')

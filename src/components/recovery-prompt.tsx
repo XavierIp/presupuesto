@@ -1,11 +1,13 @@
 import { KeyRound } from "lucide-react";
 import { recoveryCodeInfo } from "@/lib/recovery";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, getSessionUser } from "@/lib/session";
 import { RecoveryCodePanel } from "./recovery-code-panel";
 
 /** Aviso para quien aún no tiene código de recuperación (sin él no puede recuperar su cuenta solo). */
 export async function RecoveryPrompt() {
-  const user = await getCurrentUser();
+  // Mientras llevas las cuentas de otra persona no se muestran avisos de tu propia cuenta.
+  if ((await getCurrentUser()).actor) return null;
+  const user = await getSessionUser();
   if (await recoveryCodeInfo(user.id)) return null;
 
   return (
