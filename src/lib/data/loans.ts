@@ -290,6 +290,8 @@ export type LoanAgendaItem = {
   accountId: string | null;
   /** Préstamo a alguien que no usa la app (no hay quien confirme). */
   external: boolean;
+  /** Sus abonos no entran a las cuentas del prestamista (no cuentan como "por recibir"). */
+  passThrough: boolean;
 };
 
 /** Pagos de préstamos que vencen en el mes: los que debo pagar y los que me deben pagar. */
@@ -324,6 +326,7 @@ export async function loanAgenda(
       accountId:
         loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId,
       external: loan.isExternal,
+      passThrough: loan.passThrough,
     });
   }
   return items;
@@ -357,6 +360,7 @@ export async function loanOverdue(
       accountId:
         loan.role === "lender" ? loan.lenderAccountId : loan.borrowerAccountId,
       external: loan.isExternal,
+      passThrough: loan.passThrough,
     };
     for (const cuota of loan.schedule) {
       if (cuota.paid || !late(cuota.dueOn)) continue;

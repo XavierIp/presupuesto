@@ -122,7 +122,9 @@ export async function getDashboard(monthParam?: string) {
       (i) => i.kind === "plan" && i.direction === "in" && i.status !== "paid",
     )
     .reduce((sum, i) => sum + i.amount, 0);
+  // Lo que solo pasa por mí para pagar otra deuda (p. ej. Yape) no cuenta como "por recibir".
   const toCollect = mine
+    .filter((i) => !(i.kind === "loan" && i.passThrough))
     .filter((i) => i.direction === "in" && i.status !== "paid")
     .reduce((sum, i) => sum + i.amount, 0);
   // Vencidos de meses anteriores: suman a "Por pagar" pero no van al calendario.

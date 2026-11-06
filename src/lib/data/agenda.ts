@@ -59,6 +59,7 @@ export type AgendaItem =
       role: "lender" | "borrower";
       accountId: string | null;
       external: boolean;
+      passThrough: boolean;
     });
 
 export type CardBillLine = {
@@ -198,6 +199,7 @@ export async function buildAgenda(
       role: loan.role,
       accountId: loan.accountId,
       external: loan.external,
+      passThrough: loan.passThrough,
       name: loan.name,
       detail: loan.detail,
       amount: paid ? loan.amount : loan.remaining,
@@ -286,6 +288,7 @@ export async function overdueBefore(
       role: loan.role,
       accountId: loan.accountId,
       external: loan.external,
+      passThrough: loan.passThrough,
       name: loan.name,
       detail: loan.detail,
       amount: loan.remaining,
