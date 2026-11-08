@@ -114,30 +114,39 @@ export function cardBill(
       )
       .reduce((sum, p) => sum + p.amount, 0);
 
+  // `carried`: lo que quedó sin pagar (o a favor) de cada estado de cuenta.
+  // `unbilled`: deuda que la app tenía pero el banco no cobró en un mes en que se usó el
+  // monto del banco; pasa al siguiente estado de cuenta para que ninguna deuda se pierda.
   let carried = 0;
+  let unbilled = 0;
   for (let k = lookback; k >= 1; k--) {
     const month = addMonths(dueMonth, -k);
+    let due = carried + billAmount(card, month, charges).total + unbilled;
+    unbilled = 0;
     const bank = fromBank[formatYearMonth(month)];
-    // Con el monto del banco ese mes ya incluye lo arrastrado: se empieza de cero desde ahí.
-    carried =
-      (bank !== undefined ? bank : carried + billAmount(card, month, charges).total) -
-      paidIn(billDates(card, month));
+    if (bank !== undefined) {
+      unbilled = Math.max(due - bank, 0);
+      due = bank;
+    }
+    carried = due - paidIn(billDates(card, month));
   }
 
   const dates = billDates(card, dueMonth);
-  const { total: newCharges, items } = billAmount(card, dueMonth, charges);
+  const { total: computed, items } = billAmount(card, dueMonth, charges);
+  const newCharges = computed + unbilled;
   const bank = fromBank[formatYearMonth(dueMonth)];
   return {
     dates,
     /** Saldo arrastrado de meses anteriores (negativo = saldo a favor). */
     previous: bank !== undefined ? 0 : carried,
     newCharges,
+    /** Deuda que el banco aún no había cobrado (incluida en `newCharges`). */
+    unbilled: bank !== undefined ? 0 : unbilled,
     items,
     /** Total a pagar en este vencimiento. */
     billed: bank !== undefined ? bank : Math.max(0, carried + newCharges),
     /** Pagado después del corte de este estado de cuenta. */
     paid: paidIn(dates),
-    /** El total viene del estado de cuenta del banco (no del cálculo de la app). */
     fromBank: bank !== undefined,
   };
 }

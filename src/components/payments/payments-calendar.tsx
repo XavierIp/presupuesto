@@ -509,6 +509,21 @@ function DayItem({ item }: { item: AgendaItem }) {
                 currency={item.currency}
               />
             )}
+            {item.previous < 0 && (
+              <Line
+                label="Saldo a favor (pagaste de más)"
+                amount={item.previous}
+                currency={item.currency}
+              />
+            )}
+            {item.unbilled > 0 && (
+              <Line
+                label="Deuda que el banco aún no te cobraba"
+                sub="Viene del ajuste con tu estado de cuenta anterior"
+                amount={item.unbilled}
+                currency={item.currency}
+              />
+            )}
             {item.lines.map((l, i) => (
               <Line
                 key={i}

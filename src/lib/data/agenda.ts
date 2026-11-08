@@ -54,6 +54,8 @@ export type AgendaItem =
       lines: CardBillLine[];
       /** El total viene del estado de cuenta del banco. */
       fromBank: boolean;
+      /** Deuda que el banco no había cobrado antes y entra en este pago. */
+      unbilled: number;
     })
   | (Base & {
       kind: "loan";
@@ -186,6 +188,7 @@ export async function buildAgenda(
       estimated,
       lines: card.lines,
       fromBank: bill.fromBank,
+      unbilled: bill.unbilled,
       status: nothingDue
         ? "clear"
         : statusFor(bill.dates.dueDate, today, isPaid),
