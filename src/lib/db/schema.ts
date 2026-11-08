@@ -419,6 +419,25 @@ export const recurringPaymentRecordsRelations = relations(recurringPaymentRecord
 }));
 
 /**
+ * Monto real del estado de cuenta de una tarjeta (lo que dice el banco) para el pago que
+ * vence en `dueMonth` ("YYYY-MM"). Reemplaza al cálculo de la app para ese mes.
+ */
+export const cardStatementAmounts = pgTable(
+  "card_statement_amounts",
+  {
+    id: id(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => financialAccounts.id, { onDelete: "cascade" }),
+    dueMonth: text("due_month").notNull(),
+    amount: cents("amount").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("card_statement_amounts_month_idx").on(t.accountId, t.dueMonth)],
+);
+
+/**
  * Acceso compartido: `managerId` lleva las cuentas de `ownerId`.
  * Lo pide quien las va a llevar; la dueña lo acepta y puede quitarlo cuando quiera.
  */

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import {
   billDates,
   billedInstallments,
@@ -9,7 +9,12 @@ import {
   type CardCharge,
 } from "@/lib/card-billing";
 import { db } from "@/lib/db";
-import { financialAccounts, transactions } from "@/lib/db/schema";
+import {
+  cardStatementAmounts,
+  financialAccounts,
+  loans,
+  transactions,
+} from "@/lib/db/schema";
 import { addMonths, dateIn, firstDayOf, type YearMonth } from "@/lib/schedule";
 
 // Uso interno de la capa de datos: quien llama ya resolvió al usuario con getCurrentUser().
@@ -50,18 +55,22 @@ export async function cardStatements(
   const cardIds = cards.map((c) => c.id);
   // Las cuotas pueden venir de compras de hasta 5 años atrás.
   const since = firstDayOf(addMonths(dueMonth, -(LOOKBACK + 60)));
-  const [charges, payments] = await Promise.all([
+  const [charges, payments, bankAmounts] = await Promise.all([
     db
       .select({
         id: transactions.id,
         accountId: transactions.accountId,
-        description: transactions.description,
+        // Compra para un préstamo: se muestra con el comentario del préstamo ("Monitor").
+        description: sql<
+          string | null
+        >`coalesce(nullif(split_part(${loans.note}, ' · ', 1), ''), ${transactions.description})`,
         occurredOn: transactions.occurredOn,
         amount: transactions.amount,
         installments: transactions.installments,
         installmentAmount: transactions.installmentAmount,
       })
       .from(transactions)
+      .leftJoin(loans, eq(loans.id, transactions.loanId))
       .where(
         and(
           eq(transactions.userId, userId),
@@ -88,6 +97,10 @@ export async function cardStatements(
           ),
         ),
       ),
+    db
+      .select()
+      .from(cardStatementAmounts)
+      .where(inArray(cardStatementAmounts.accountId, cardIds)),
   ]);
 
   return cards.map((card) => {
@@ -145,6 +158,11 @@ export async function cardStatements(
             billable,
             payments.filter((p) => p.toAccountId === card.id),
             LOOKBACK,
+            Object.fromEntries(
+              bankAmounts
+                .filter((b) => b.accountId === card.id)
+                .map((b) => [b.dueMonth, b.amount]),
+            ),
           )
         : null,
       statementDate: cycle ? statementDateIn(cycle, dueMonth) : null,

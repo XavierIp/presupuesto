@@ -52,6 +52,8 @@ export type AgendaItem =
       estimated: boolean;
       /** Compras y cuotas que forman este pago. */
       lines: CardBillLine[];
+      /** El total viene del estado de cuenta del banco. */
+      fromBank: boolean;
     })
   | (Base & {
       kind: "loan";
@@ -158,7 +160,7 @@ export async function buildAgenda(
     // El día de pago aparece siempre, aunque no haya nada que pagar ese mes.
     const nothingDue = bill.billed <= 0;
     const isPaid = !nothingDue && bill.paid >= bill.billed;
-    const estimated = bill.dates.statementDate >= today;
+    const estimated = !bill.fromBank && bill.dates.statementDate >= today;
     items.push({
       kind: "card",
       key: `card:${card.id}`,
@@ -170,6 +172,7 @@ export async function buildAgenda(
             card.last4 ? `•••• ${card.last4}` : null,
             bill.previous > 0 ? "incluye saldo anterior" : null,
             estimated ? "estimado hasta el corte" : null,
+            bill.fromBank ? "según tu estado de cuenta" : null,
           ]
             .filter(Boolean)
             .join(" · ") || null,
@@ -182,6 +185,7 @@ export async function buildAgenda(
       statementDate: bill.dates.statementDate,
       estimated,
       lines: card.lines,
+      fromBank: bill.fromBank,
       status: nothingDue
         ? "clear"
         : statusFor(bill.dates.dueDate, today, isPaid),

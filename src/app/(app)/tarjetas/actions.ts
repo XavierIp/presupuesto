@@ -5,7 +5,7 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 import type { FormState } from "@/app/(app)/actions";
 import { db } from "@/lib/db";
-import { financialAccounts, transactions } from "@/lib/db/schema";
+import { cardStatementAmounts, financialAccounts, transactions } from "@/lib/db/schema";
 import { accountBalances, ownActiveAccount } from "@/lib/data/accounts";
 import { todayIn } from "@/lib/schedule";
 import { getCurrentUser } from "@/lib/session";
@@ -153,6 +153,57 @@ export async function payCreditCard(_prev: FormState, formData: FormData): Promi
     occurredOn: todayIn(),
   });
 
+  refresh();
+  return { ok: true };
+}
+
+/**
+ * Ajusta la tarjeta a lo que dice el banco: el total del estado de cuenta de un mes
+ * (vacío = volver al cálculo de la app) y, si se indica, la deuda total de hoy.
+ */
+export async function saveCardStatement(_prev: FormState, formData: FormData): Promise<FormState> {
+  const user = await getCurrentUser();
+  const cardId = String(formData.get("cardId") ?? "");
+  const dueMonth = String(formData.get("dueMonth") ?? "");
+  if (!/^\d{4}-\d{2}$/.test(dueMonth)) return { ok: false, error: "Mes no válido." };
+  const card = (await accountBalances(user.id)).find((a) => a.id === cardId);
+  if (!card || card.type !== "credit") return { ok: false, error: "No encontramos esa tarjeta." };
+
+  const rawAmount = String(formData.get("amount") ?? "").trim();
+  const amount = rawAmount ? money("el pago total del mes").safeParse(rawAmount) : null;
+  if (amount && !amount.success) {
+    return { ok: false, fieldErrors: { amount: amount.error.issues[0].message } };
+  }
+  const rawDebt = String(formData.get("debt") ?? "").trim();
+  const debt = rawDebt ? money("la deuda total").safeParse(rawDebt) : null;
+  if (debt && !debt.success) {
+    return { ok: false, fieldErrors: { debt: debt.error.issues[0].message } };
+  }
+
+  await db.transaction(async (tx) => {
+    if (amount?.success) {
+      await tx
+        .insert(cardStatementAmounts)
+        .values({ accountId: card.id, dueMonth, amount: amount.data })
+        .onConflictDoUpdate({
+          target: [cardStatementAmounts.accountId, cardStatementAmounts.dueMonth],
+          set: { amount: amount.data },
+        });
+    } else {
+      await tx
+        .delete(cardStatementAmounts)
+        .where(
+          and(eq(cardStatementAmounts.accountId, card.id), eq(cardStatementAmounts.dueMonth, dueMonth)),
+        );
+    }
+    // Deuda total de hoy: se ajusta el saldo inicial (los movimientos no se tocan).
+    if (debt?.success) {
+      await tx
+        .update(financialAccounts)
+        .set({ openingBalance: card.openingBalance + (-debt.data - card.balance) })
+        .where(and(eq(financialAccounts.id, card.id), eq(financialAccounts.userId, user.id)));
+    }
+  });
   refresh();
   return { ok: true };
 }

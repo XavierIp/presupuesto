@@ -22,6 +22,7 @@ import { formatDate } from "@/lib/schedule";
 import { AccountForm } from "./account-form";
 import { archiveAccount } from "./actions";
 import { PayCardForm } from "./pay-card-form";
+import { StatementForm } from "./statement-form";
 
 export const metadata: Metadata = { title: "Tarjetas y cuentas" };
 
@@ -297,6 +298,7 @@ function CreditDetails({ account }: { account: Account }) {
             </span>
           </div>
           <p className="text-muted-foreground">
+            {account.statement.fromBank && "Según tu estado de cuenta · "}
             {account.statement.billed <= 0
               ? "Sin consumos por pagar."
               : account.statement.paid >= account.statement.billed
@@ -316,6 +318,29 @@ function CreditDetails({ account }: { account: Account }) {
                     .filter(Boolean)
                     .join(" · ")}
           </p>
+          <Modal
+            title="Usar mi estado de cuenta"
+            description={`${account.name} · pago del ${formatDate(account.statement.dueDate, { withYear: false })}`}
+            trigger={{
+              variant: "ghost",
+              className:
+                "-mx-1 h-8 w-fit px-1 text-[13px] font-medium text-primary hover:bg-transparent hover:underline",
+              label: account.statement.fromBank
+                ? "Cambiar monto del estado de cuenta"
+                : "¿No cuadra con tu banco? Usar mi estado de cuenta",
+            }}
+          >
+            <StatementForm
+              cardId={account.id}
+              currency={account.currency}
+              dueMonth={account.statement.dueMonth}
+              dueDate={account.statement.dueDate}
+              billed={account.statement.billed}
+              paid={account.statement.paid}
+              debt={account.debt}
+              fromBank={account.statement.fromBank}
+            />
+          </Modal>
         </div>
       ) : (
         <p className="text-muted-foreground">
@@ -323,20 +348,31 @@ function CreditDetails({ account }: { account: Account }) {
           el calendario.
         </p>
       )}
-      {account.pendingInstallments.length > 0 && (
-        <details className="group">
-          <summary className="cursor-pointer list-none font-medium text-primary [&::-webkit-details-marker]:hidden">
-            Cuotas por pagar ({account.pendingInstallments.length}) ·{" "}
-            {formatMoney(
-              account.pendingInstallments.reduce(
-                (sum, c) => sum + c.remaining,
-                0,
-              ),
-              account.currency,
-            )}
-          </summary>
-          <ul className="mt-2 grid gap-2">
-            {account.pendingInstallments.map((c) => (
+      <DebtBreakdown account={account} />
+    </div>
+  );
+}
+
+/** Deuda total separada en cuotas que aún te van a cobrar y el resto (compras y demás). */
+function DebtBreakdown({ account }: { account: Account }) {
+  if (account.debt <= 0) return null;
+  const money = (cents: number) => formatMoney(cents, account.currency);
+  const installments = account.pendingInstallments;
+  const inInstallments = installments.reduce((sum, c) => sum + c.remaining, 0);
+  const rest = Math.max(account.debt - inInstallments, 0);
+  return (
+    <div className="grid gap-1.5 rounded-lg border px-3 py-2.5">
+      <p className="flex items-baseline justify-between gap-2">
+        <span className="font-medium text-foreground">Deuda total</span>
+        <span className="text-sm font-semibold text-foreground tabular-nums">
+          {money(account.debt)}
+        </span>
+      </p>
+      {installments.length > 0 && (
+        <>
+          <p className="text-muted-foreground">Cuotas por cobrar</p>
+          <ul className="grid gap-1.5 pl-3">
+            {installments.map((c) => (
               <li
                 key={c.id}
                 className="flex items-baseline justify-between gap-2"
@@ -346,18 +382,22 @@ function CreditDetails({ account }: { account: Account }) {
                     {c.description ?? "Compra en cuotas"}
                   </span>
                   <span className="text-muted-foreground">
-                    {c.billed} de {c.total} cobradas ·{" "}
-                    {formatMoney(c.each, account.currency)} c/u
+                    Faltan {c.total - c.billed} de {c.total} ·{" "}
+                    {money(c.each)} c/u
                   </span>
                 </span>
                 <span className="shrink-0 tabular-nums">
-                  {formatMoney(c.remaining, account.currency)}
+                  {money(c.remaining)}
                 </span>
               </li>
             ))}
           </ul>
-        </details>
+        </>
       )}
+      <p className="flex items-baseline justify-between gap-2">
+        <span className="text-muted-foreground">Compras y demás</span>
+        <span className="tabular-nums">{money(rest)}</span>
+      </p>
     </div>
   );
 }

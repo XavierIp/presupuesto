@@ -62,7 +62,11 @@ export async function getAccountsPage() {
             previous: statement.bill.previous,
             dueDate: statement.bill.dates.dueDate,
             statementDate: statement.bill.dates.statementDate,
-            estimated: statement.bill.dates.statementDate >= today,
+            estimated:
+              !statement.bill.fromBank && statement.bill.dates.statementDate >= today,
+            fromBank: statement.bill.fromBank,
+            /** Mes del pago ("YYYY-MM"), para guardar el monto del estado de cuenta. */
+            dueMonth: statement.bill.dates.dueDate.slice(0, 7),
           }
         : null,
       pendingInstallments: current.find((c) => c.id === a.id)?.pendingInstallments ?? [],

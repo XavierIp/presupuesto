@@ -51,3 +51,8 @@ skills-lock.json
 # scripts temporales
 .q.mjs
 .check.mjs
+
+# estados de cuenta personales (nunca subir)
+/ESTADO/
+*.PDF
+*.pdf

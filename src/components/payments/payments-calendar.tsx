@@ -496,7 +496,10 @@ function DayItem({ item }: { item: AgendaItem }) {
           <p className="text-muted-foreground">
             Estado de cuenta del corte del{" "}
             {formatDate(item.statementDate, { withYear: false })}
-            {item.estimated ? " (aún puede subir)" : ""}:
+            {item.estimated ? " (aún puede subir)" : ""}
+            {item.fromBank
+              ? `: total según tu banco ${formatMoney(item.billed, item.currency)}. Lo que registraste en la app para este corte:`
+              : ":"}
           </p>
           <ul className="grid gap-1">
             {item.previous > 0 && (

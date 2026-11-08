@@ -102,6 +102,8 @@ export function cardBill(
   charges: CardCharge[],
   payments: CardPayment[],
   lookback = 12,
+  /** Montos reales del banco por mes de pago ("YYYY-MM"): reemplazan al cálculo de ese mes. */
+  fromBank: Record<string, number> = {},
 ) {
   const paidIn = (dates: ReturnType<typeof billDates>) =>
     payments
@@ -115,22 +117,28 @@ export function cardBill(
   let carried = 0;
   for (let k = lookback; k >= 1; k--) {
     const month = addMonths(dueMonth, -k);
-    carried +=
-      billAmount(card, month, charges).total - paidIn(billDates(card, month));
+    const bank = fromBank[formatYearMonth(month)];
+    // Con el monto del banco ese mes ya incluye lo arrastrado: se empieza de cero desde ahí.
+    carried =
+      (bank !== undefined ? bank : carried + billAmount(card, month, charges).total) -
+      paidIn(billDates(card, month));
   }
 
   const dates = billDates(card, dueMonth);
   const { total: newCharges, items } = billAmount(card, dueMonth, charges);
+  const bank = fromBank[formatYearMonth(dueMonth)];
   return {
     dates,
     /** Saldo arrastrado de meses anteriores (negativo = saldo a favor). */
-    previous: carried,
+    previous: bank !== undefined ? 0 : carried,
     newCharges,
     items,
     /** Total a pagar en este vencimiento. */
-    billed: Math.max(0, carried + newCharges),
+    billed: bank !== undefined ? bank : Math.max(0, carried + newCharges),
     /** Pagado después del corte de este estado de cuenta. */
     paid: paidIn(dates),
+    /** El total viene del estado de cuenta del banco (no del cálculo de la app). */
+    fromBank: bank !== undefined,
   };
 }
 
